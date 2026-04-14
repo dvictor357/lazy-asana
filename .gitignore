@@ -31,3 +31,4 @@ Thumbs.db
 
 # Config with secrets
 .config/
+.claude/
