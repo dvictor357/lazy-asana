@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -39,6 +40,7 @@ type BindModel struct {
 	status        string
 	err           string
 	hoursFieldGID string
+	spinner       spinner.Model
 }
 
 func NewBindModel(cfg *config.Config) BindModel {
@@ -57,11 +59,15 @@ func NewBindModel(cfg *config.Config) BindModel {
 	or.CharLimit = 200
 	or.Width = 50
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
 	return BindModel{
 		cfg:        cfg,
 		step:       bindStepTokens,
 		asanaToken: at,
 		openrouter: or,
+		spinner:    sp,
 	}
 }
 
@@ -104,6 +110,12 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.wsCursor++
 			}
 		}
+	}
+
+	if _, ok := msg.(spinner.TickMsg); ok {
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -156,11 +168,12 @@ func (m *BindModel) handleEnter() (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.cfg.AsanaToken = token
 		m.cfg.OpenRouterKey = m.openrouter.Value()
-		return m, m.validateAndFetch(token)
+		return m, tea.Batch(m.validateAndFetch(token), m.spinner.Tick)
 	case bindStepWorkspace:
 		if len(m.projects) == 0 {
 			if m.wsCursor < len(m.workspaces) {
-				return m, m.fetchProjects(m.workspaces[m.wsCursor].GID)
+				m.loading = true
+				return m, tea.Batch(m.fetchProjects(m.workspaces[m.wsCursor].GID), m.spinner.Tick)
 			}
 		}
 		if m.projCursor < len(m.projects) {
@@ -198,7 +211,13 @@ func (m BindModel) fetchProjects(wsGID string) tea.Cmd {
 		if err != nil {
 			return bindResult{err: fmt.Errorf("failed to fetch projects: %w", err)}
 		}
-		settings, _ := client.GetCustomFieldSettings(projects[0].GID)
+		if len(projects) == 0 {
+			return bindResult{projects: projects}
+		}
+		settings, err := client.GetCustomFieldSettings(projects[0].GID)
+		if err != nil {
+			return bindResult{err: fmt.Errorf("failed to fetch custom fields: %w", err)}
+		}
 		return bindResult{projects: projects, settings: settings}
 	}
 }
@@ -238,7 +257,7 @@ func (m BindModel) View() string {
 
 	if m.step == bindStepWorkspace {
 		if m.loading {
-			s += "Loading...\n"
+			s += m.spinner.View() + " Loading...\n"
 			return lipgloss.NewStyle().Padding(2, 4).Render(s)
 		}
 

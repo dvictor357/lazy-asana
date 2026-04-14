@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -26,15 +27,16 @@ type hoursResult struct {
 }
 
 type HoursModel struct {
-	cfg    *config.Config
-	client *asana.Client
-	step   hoursStep
-	mode   int
-	inputs []textinput.Model
-	cursor int
-	tasks  []asana.Task
-	err    string
-	total  float64
+	cfg     *config.Config
+	client  *asana.Client
+	step    hoursStep
+	mode    int
+	inputs  []textinput.Model
+	cursor  int
+	tasks   []asana.Task
+	err     string
+	total   float64
+	spinner spinner.Model
 }
 
 func NewHoursModel(cfg *config.Config, client *asana.Client) HoursModel {
@@ -54,12 +56,16 @@ func NewHoursModel(cfg *config.Config, client *asana.Client) HoursModel {
 	dateEnd.CharLimit = 10
 	dateEnd.Width = 12
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
 	return HoursModel{
-		cfg:    cfg,
-		client: client,
-		step:   hoursStepInput,
-		mode:   0,
-		inputs: []textinput.Model{weekInput, dateStart, dateEnd},
+		cfg:     cfg,
+		client:  client,
+		step:    hoursStepInput,
+		mode:    0,
+		inputs:  []textinput.Model{weekInput, dateStart, dateEnd},
+		spinner: sp,
 	}
 }
 
@@ -68,6 +74,12 @@ func (m HoursModel) Init() tea.Cmd {
 }
 
 func (m HoursModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(spinner.TickMsg); ok {
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -166,7 +178,7 @@ func (m *HoursModel) handleFetch() (tea.Model, tea.Cmd) {
 	wsGID := m.cfg.DefaultWorkspaceGID
 	projGID := m.cfg.DefaultProjectGID
 
-	return m, func() tea.Msg {
+	return m, tea.Batch(func() tea.Msg {
 		filters := url.Values{
 			"projects.any":  {projGID},
 			"due_on.after":  {dateStart},
@@ -177,7 +189,7 @@ func (m *HoursModel) handleFetch() (tea.Model, tea.Cmd) {
 			return hoursResult{err: err}
 		}
 		return hoursResult{tasks: tasks}
-	}
+	}, m.spinner.Tick)
 }
 
 func (m HoursModel) View() string {
@@ -216,7 +228,7 @@ func (m HoursModel) View() string {
 	}
 
 	if m.step == hoursStepLoading {
-		s += "Loading tasks...\n"
+		s += m.spinner.View() + " Loading tasks...\n"
 	}
 
 	if m.step == hoursStepView {

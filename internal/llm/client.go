@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const openRouterURL = "https://openrouter.ai/api/v1/chat/completions"
@@ -29,8 +30,9 @@ type ChatResponse struct {
 }
 
 type Client struct {
-	apiKey string
-	model  string
+	apiKey     string
+	model      string
+	httpClient *http.Client
 }
 
 func NewClient(apiKey, model string) *Client {
@@ -38,8 +40,9 @@ func NewClient(apiKey, model string) *Client {
 		model = "deepseek/deepseek-chat-v3-0324"
 	}
 	return &Client{
-		apiKey: apiKey,
-		model:  model,
+		apiKey:     apiKey,
+		model:      model,
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -63,7 +66,7 @@ func (c *Client) Chat(messages []Message) (string, error) {
 	req.Header.Set("HTTP-Referer", "https://github.com/dvictor357/lazy-asana")
 	req.Header.Set("X-Title", "lazy-asana")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
