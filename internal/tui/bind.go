@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -22,8 +23,13 @@ const (
 type bindResult struct {
 	workspaces []asana.Workspace
 	projects   []asana.Project
-	settings   []asana.CustomFieldSetting
+	userGID    string
 	err        error
+}
+
+type customFieldsResult struct {
+	settings []asana.CustomFieldSetting
+	err      error
 }
 
 type BindModel struct {
@@ -36,6 +42,7 @@ type BindModel struct {
 	projects      []asana.Project
 	wsCursor      int
 	projCursor    int
+	projSearch    textinput.Model
 	loading       bool
 	status        string
 	err           string
@@ -59,6 +66,11 @@ func NewBindModel(cfg *config.Config) BindModel {
 	or.CharLimit = 200
 	or.Width = 50
 
+	ps := textinput.New()
+	ps.Placeholder = "type to filter..."
+	ps.CharLimit = 100
+	ps.Width = 40
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
@@ -67,6 +79,7 @@ func NewBindModel(cfg *config.Config) BindModel {
 		step:       bindStepTokens,
 		asanaToken: at,
 		openrouter: or,
+		projSearch: ps,
 		spinner:    sp,
 	}
 }
@@ -75,17 +88,43 @@ func (m BindModel) Init() tea.Cmd {
 	return nil
 }
 
+func (m BindModel) filteredProjects() []asana.Project {
+	query := strings.ToLower(strings.TrimSpace(m.projSearch.Value()))
+	if query == "" {
+		return m.projects
+	}
+	var result []asana.Project
+	for _, p := range m.projects {
+		if strings.Contains(strings.ToLower(p.Name), query) {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(spinner.TickMsg); ok {
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	}
+
+	showingProjects := m.step == bindStepWorkspace && len(m.projects) > 0
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
 			if m.step == bindStepWorkspace {
 				m.step = bindStepTokens
+				m.projects = nil
+				m.workspaces = nil
+				m.projSearch.SetValue("")
 				m.asanaToken.Focus()
 				return m, nil
 			}
 			return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
+
 		case "tab", "shift+tab":
 			if m.step == bindStepTokens {
 				if m.cursor == 0 {
@@ -99,23 +138,84 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "enter":
-			return m.handleEnter()
+
 		case "up", "k":
+			if showingProjects {
+				if m.projCursor > 0 {
+					m.projCursor--
+				}
+				return m, nil
+			}
 			if m.step == bindStepWorkspace && m.wsCursor > 0 {
 				m.wsCursor--
 			}
+			return m, nil
+
 		case "down", "j":
+			if showingProjects {
+				filtered := m.filteredProjects()
+				if m.projCursor < len(filtered)-1 {
+					m.projCursor++
+				}
+				return m, nil
+			}
 			if m.step == bindStepWorkspace && m.wsCursor < len(m.workspaces)-1 {
 				m.wsCursor++
 			}
-		}
-	}
+			return m, nil
 
-	if _, ok := msg.(spinner.TickMsg); ok {
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		case "enter":
+			return m.handleEnter()
+		}
+
+		// Typing goes to search input when showing projects
+		if showingProjects {
+			prev := m.projSearch.Value()
+			var cmd tea.Cmd
+			m.projSearch, cmd = m.projSearch.Update(msg)
+			if m.projSearch.Value() != prev {
+				m.projCursor = 0
+			}
+			return m, cmd
+		}
+
+	case bindResult:
+		if m.step == bindStepWorkspace {
+			m.loading = false
+			if msg.err != nil {
+				m.err = msg.err.Error()
+				return m, nil
+			}
+			if msg.userGID != "" {
+				m.cfg.UserGID = msg.userGID
+			}
+			if m.workspaces == nil {
+				m.workspaces = msg.workspaces
+				if len(m.workspaces) == 1 {
+					m.wsCursor = 0
+					m.loading = true
+					return m, tea.Batch(m.fetchProjects(m.workspaces[0].GID), m.spinner.Tick)
+				}
+			} else if m.projects == nil {
+				m.projects = msg.projects
+				m.projCursor = 0
+				m.projSearch.SetValue("")
+				m.projSearch.Focus()
+			}
+			return m, nil
+		}
+
+	case customFieldsResult:
+		m.loading = false
+		if msg.err == nil {
+			m.hoursFieldGID = findActualHoursField(msg.settings)
+		}
+		m.cfg.ActualHoursFieldGID = m.hoursFieldGID
+		if err := m.cfg.Save(); err != nil {
+			m.err = err.Error()
+			return m, nil
+		}
+		return m, func() tea.Msg { return BindCompleteMsg{Config: m.cfg} }
 	}
 
 	var cmd tea.Cmd
@@ -126,33 +226,6 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openrouter, cmd = m.openrouter.Update(msg)
 		}
 	}
-
-	if m.step == bindStepWorkspace {
-		switch t := msg.(type) {
-		case bindResult:
-			m.loading = false
-			if t.err != nil {
-				m.err = t.err.Error()
-				return m, nil
-			}
-			if m.workspaces == nil {
-				m.workspaces = t.workspaces
-				if len(m.workspaces) == 1 {
-					m.wsCursor = 0
-					return m, m.fetchProjects(m.workspaces[0].GID)
-				}
-			} else if m.projects == nil {
-				m.projects = t.projects
-				if len(m.projects) > 0 {
-					m.projCursor = 0
-				}
-			}
-			if t.settings != nil {
-				m.hoursFieldGID = findActualHoursField(t.settings)
-			}
-		}
-	}
-
 	return m, cmd
 }
 
@@ -162,45 +235,46 @@ func (m *BindModel) handleEnter() (tea.Model, tea.Cmd) {
 		token := m.asanaToken.Value()
 		if token == "" {
 			m.err = "asana token is required"
-			return m, nil
+			return *m, nil
 		}
 		m.err = ""
 		m.loading = true
+		m.step = bindStepWorkspace
 		m.cfg.AsanaToken = token
 		m.cfg.OpenRouterKey = m.openrouter.Value()
-		return m, tea.Batch(m.validateAndFetch(token), m.spinner.Tick)
+		return *m, tea.Batch(m.validateAndFetch(token), m.spinner.Tick)
+
 	case bindStepWorkspace:
 		if len(m.projects) == 0 {
 			if m.wsCursor < len(m.workspaces) {
 				m.loading = true
-				return m, tea.Batch(m.fetchProjects(m.workspaces[m.wsCursor].GID), m.spinner.Tick)
+				return *m, tea.Batch(m.fetchProjects(m.workspaces[m.wsCursor].GID), m.spinner.Tick)
 			}
 		}
-		if m.projCursor < len(m.projects) {
+		filtered := m.filteredProjects()
+		if m.projCursor < len(filtered) {
+			proj := filtered[m.projCursor]
 			m.cfg.DefaultWorkspaceGID = m.workspaces[m.wsCursor].GID
-			m.cfg.DefaultProjectGID = m.projects[m.projCursor].GID
-			m.cfg.ActualHoursFieldGID = m.hoursFieldGID
-			if err := m.cfg.Save(); err != nil {
-				m.err = err.Error()
-				return m, nil
-			}
-			return m, func() tea.Msg { return BindCompleteMsg{Config: m.cfg} }
+			m.cfg.DefaultProjectGID = proj.GID
+			m.loading = true
+			return *m, tea.Batch(m.fetchCustomFields(proj.GID), m.spinner.Tick)
 		}
 	}
-	return m, nil
+	return *m, nil
 }
 
 func (m BindModel) validateAndFetch(token string) tea.Cmd {
 	return func() tea.Msg {
 		client := asana.NewClient(token)
-		if _, err := client.GetMe(); err != nil {
+		me, err := client.GetMe()
+		if err != nil {
 			return bindResult{err: fmt.Errorf("invalid asana token: %w", err)}
 		}
 		ws, err := client.ListWorkspaces()
 		if err != nil {
 			return bindResult{err: fmt.Errorf("failed to fetch workspaces: %w", err)}
 		}
-		return bindResult{workspaces: ws}
+		return bindResult{workspaces: ws, userGID: me.GID}
 	}
 }
 
@@ -211,14 +285,18 @@ func (m BindModel) fetchProjects(wsGID string) tea.Cmd {
 		if err != nil {
 			return bindResult{err: fmt.Errorf("failed to fetch projects: %w", err)}
 		}
-		if len(projects) == 0 {
-			return bindResult{projects: projects}
-		}
-		settings, err := client.GetCustomFieldSettings(projects[0].GID)
+		return bindResult{projects: projects}
+	}
+}
+
+func (m BindModel) fetchCustomFields(projectGID string) tea.Cmd {
+	return func() tea.Msg {
+		client := asana.NewClient(m.cfg.AsanaToken)
+		settings, err := client.GetCustomFieldSettings(projectGID)
 		if err != nil {
-			return bindResult{err: fmt.Errorf("failed to fetch custom fields: %w", err)}
+			return customFieldsResult{err: err}
 		}
-		return bindResult{projects: projects, settings: settings}
+		return customFieldsResult{settings: settings}
 	}
 }
 
@@ -273,24 +351,73 @@ func (m BindModel) View() string {
 				s += style.Render(fmt.Sprintf("%s%s", cursor, ws.Name))
 				s += "\n"
 			}
-			s += "\n" + DimStyle.Render("enter to select")
+			s += "\n" + DimStyle.Render("↑/k↓/j navigate • enter to select")
 		}
 
 		if len(m.projects) > 0 {
-			s += HeaderStyle.Render(fmt.Sprintf("Workspace: %s", m.workspaces[m.wsCursor].Name))
-			s += "\n"
-			s += HeaderStyle.Render("Select Default Project")
-			for i, p := range m.projects {
-				cursor := "  "
-				style := MenuItem
-				if i == m.projCursor {
-					cursor = "> "
-					style = MenuItemSelected
-				}
-				s += style.Render(fmt.Sprintf("%s%s", cursor, p.Name))
-				s += "\n"
+			filtered := m.filteredProjects()
+
+			wsName := ""
+			if m.wsCursor < len(m.workspaces) {
+				wsName = m.workspaces[m.wsCursor].Name
 			}
-			s += "\n" + DimStyle.Render("enter to confirm • esc to go back")
+			s += HeaderStyle.Render(fmt.Sprintf("Workspace: %s", wsName))
+			s += "\n"
+
+			matchInfo := fmt.Sprintf("%d/%d", len(filtered), len(m.projects))
+			if m.projSearch.Value() != "" {
+				matchInfo = fmt.Sprintf("%d match • %d total", len(filtered), len(m.projects))
+			}
+			s += HeaderStyle.Render(fmt.Sprintf("Select Default Project (%s)", matchInfo))
+			s += "\n"
+
+			s += LabelStyle.Render("Search: ")
+			s += m.projSearch.View()
+			s += "\n\n"
+
+			if len(filtered) == 0 {
+				s += DimStyle.Render("  no projects match your search")
+				s += "\n"
+			} else {
+				const pageSize = 10
+				cursor := m.projCursor
+				if cursor >= len(filtered) {
+					cursor = len(filtered) - 1
+				}
+
+				start := cursor - pageSize/2
+				if start < 0 {
+					start = 0
+				}
+				end := start + pageSize
+				if end > len(filtered) {
+					end = len(filtered)
+					start = end - pageSize
+					if start < 0 {
+						start = 0
+					}
+				}
+
+				if start > 0 {
+					s += DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n"
+				}
+				for i := start; i < end; i++ {
+					p := filtered[i]
+					cur := "  "
+					style := MenuItem
+					if i == cursor {
+						cur = "> "
+						style = MenuItemSelected
+					}
+					s += style.Render(fmt.Sprintf("%s%s", cur, p.Name))
+					s += "\n"
+				}
+				if end < len(filtered) {
+					s += DimStyle.Render(fmt.Sprintf("  ↓ %d more", len(filtered)-end)) + "\n"
+				}
+			}
+
+			s += "\n" + DimStyle.Render("type to search • ↑/k↓/j navigate • enter confirm • esc back")
 		}
 
 		if m.err != "" {

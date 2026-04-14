@@ -17,7 +17,7 @@ func (m *PlannerModel) updateLLMPlan(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.llmGenerating = false
 			if t.err != "" {
 				m.llmErr = t.err
-				return m, nil
+				return *m, nil
 			}
 			for _, pt := range t.tasks {
 				m.tasks = append(m.tasks, PlanTask{
@@ -29,26 +29,26 @@ func (m *PlannerModel) updateLLMPlan(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			m.step = plannerStepMenu
-			return m, nil
+			return *m, nil
 		}
-		return m, nil
+		return *m, nil
 	}
 
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
 		var cmd tea.Cmd
 		m.llmContext, cmd = m.llmContext.Update(msg)
-		return m, cmd
+		return *m, cmd
 	}
 
 	switch k.String() {
 	case "enter":
 		if m.llmContext.Value() == "" {
-			return m, nil
+			return *m, nil
 		}
 		m.llmGenerating = true
 		context := m.llmContext.Value()
-		return m, tea.Batch(func() tea.Msg {
+		return *m, tea.Batch(func() tea.Msg {
 			resp, err := m.llmCli.GenerateWeekPlan(context)
 			if err != nil {
 				return llmPlanResult{err: err.Error()}
@@ -60,12 +60,12 @@ func (m *PlannerModel) updateLLMPlan(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return llmPlanResult{tasks: tasks}
 		}, m.spinner.Tick)
 	case "ctrl+s":
-		return m, m.handleLLMSubmit()
+		return *m, m.handleLLMSubmit()
 	}
 
 	var cmd tea.Cmd
 	m.llmContext, cmd = m.llmContext.Update(msg)
-	return m, cmd
+	return *m, cmd
 }
 
 func convertSubtasks(subs []struct {

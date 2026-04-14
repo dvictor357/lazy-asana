@@ -16,6 +16,7 @@ const (
 	screenHours
 	screenPlanner
 	screenChat
+	screenMigrate
 )
 
 type App struct {
@@ -28,6 +29,7 @@ type App struct {
 	hours   HoursModel
 	planner PlannerModel
 	chat    ChatModel
+	migrate MigrateModel
 	width   int
 	height  int
 	err     string
@@ -95,6 +97,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case screenMenu:
 			a.menu = NewMenu(a.cfg.IsBound())
+		case screenMigrate:
+			a.migrate = NewMigrateModel(a.cfg, a.asana)
 		}
 		return a, nil
 	case ErrorMsg:
@@ -134,6 +138,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, c := a.chat.Update(msg)
 		a.chat = m.(ChatModel)
 		cmd = c
+	case screenMigrate:
+		m, c := a.migrate.Update(msg)
+		a.migrate = m.(MigrateModel)
+		cmd = c
 	}
 	return a, cmd
 }
@@ -151,6 +159,8 @@ func (a *App) View() string {
 		content = a.planner.View()
 	case screenChat:
 		content = a.chat.View()
+	case screenMigrate:
+		content = a.migrate.View()
 	}
 
 	if a.err != "" {

@@ -53,7 +53,7 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
-		return m, nil
+		return *m, nil
 	}
 
 	switch k.String() {
@@ -74,10 +74,10 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hoursInput.SetValue("")
 			m.dateInput.SetValue("")
 			m.titleInput.Focus()
-			return m, nil
+			return *m, nil
 		case 1:
 			if len(m.tasks) == 0 {
-				return m, nil
+				return *m, nil
 			}
 			m.step = plannerStepAddSubtask
 			m.subParent = m.cursor
@@ -85,29 +85,29 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.descInput.SetValue("")
 			m.hoursInput.SetValue("")
 			m.titleInput.Focus()
-			return m, nil
+			return *m, nil
 		case 2:
 			if m.llmCli == nil {
-				return m, func() tea.Msg { return ErrorMsg{Message: "no OpenRouter key configured"} }
+				return *m, func() tea.Msg { return ErrorMsg{Message: "no OpenRouter key configured"} }
 			}
 			m.step = plannerStepLLMPlan
 			m.llmContext.SetValue("")
 			m.llmContext.Focus()
 			m.llmErr = ""
-			return m, nil
+			return *m, nil
 		case 3:
 			if len(m.tasks) == 0 {
-				return m, nil
+				return *m, nil
 			}
 			m.step = plannerStepReview
-			return m, nil
+			return *m, nil
 		}
 	case "tab":
 		if len(m.tasks) > 0 {
 			m.cursor = (m.cursor + 1) % len(m.tasks)
 		}
 	}
-	return m, nil
+	return *m, nil
 }
 
 func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -123,14 +123,14 @@ func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		m.dateInput, cmd = m.dateInput.Update(msg)
 		cmds = append(cmds, cmd)
-		return m, tea.Batch(cmds...)
+		return *m, tea.Batch(cmds...)
 	}
 
 	switch k.String() {
 	case "tab":
-		return m, m.handleGenerateDescription()
+		return *m, m.handleGenerateDescription()
 	case "enter":
-		return m, m.handleSaveTask()
+		return *m, m.handleSaveTask()
 	}
 
 	var cmd tea.Cmd
@@ -138,7 +138,7 @@ func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.descInput, _ = m.descInput.Update(msg)
 	m.hoursInput, _ = m.hoursInput.Update(msg)
 	m.dateInput, _ = m.dateInput.Update(msg)
-	return m, cmd
+	return *m, cmd
 }
 
 func (m *PlannerModel) handleGenerateDescription() tea.Cmd {
@@ -199,7 +199,7 @@ func (m *PlannerModel) handleSaveTask() tea.Cmd {
 func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
-		return m, nil
+		return *m, nil
 	}
 
 	switch k.String() {
@@ -223,7 +223,7 @@ func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = plannerStepConfirm
 		}
 	}
-	return m, nil
+	return *m, nil
 }
 
 func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -235,15 +235,15 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if t.err != "" {
 				m.submitErr = t.err
 				m.step = plannerStepMenu
-				return m, nil
+				return *m, nil
 			}
 			if t.done {
 				m.step = plannerStepDone
-				return m, nil
+				return *m, nil
 			}
-			return m, m.submitNext(t.idx)
+			return *m, m.submitNext(t.idx)
 		}
-		return m, nil
+		return *m, nil
 	}
 
 	switch k.String() {
@@ -251,21 +251,21 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.submitIdx = 0
 		m.submitErr = ""
 		m.step = plannerStepSubmitting
-		return m, tea.Batch(m.submitNext(0), m.spinner.Tick)
+		return *m, tea.Batch(m.submitNext(0), m.spinner.Tick)
 	case "n", "esc":
 		m.step = plannerStepReview
 	}
-	return m, nil
+	return *m, nil
 }
 
 func (m *PlannerModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
-		return m, nil
+		return *m, nil
 	}
 	if k.String() == "enter" || k.String() == "esc" {
 		m.tasks = nil
 		m.step = plannerStepMenu
 	}
-	return m, nil
+	return *m, nil
 }

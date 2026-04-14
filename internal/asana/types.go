@@ -14,9 +14,10 @@ type Task struct {
 	DueOn        string        `json:"due_on,omitempty"`
 	Completed    bool          `json:"completed"`
 	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
-	CustomFields []CustomField `json:"custom_fields,omitempty"`
-	Parent       *TaskRef      `json:"parent,omitempty"`
-	Subtasks     []Task        `json:"subtasks,omitempty"`
+	CustomFields []CustomField    `json:"custom_fields,omitempty"`
+	Memberships  []TaskMembership `json:"memberships,omitempty"`
+	Parent       *TaskRef         `json:"parent,omitempty"`
+	Subtasks     []Task           `json:"subtasks,omitempty"`
 }
 
 type TaskRef struct {
@@ -57,6 +58,16 @@ type CustomField struct {
 type EnumOption struct {
 	GID  string `json:"gid"`
 	Name string `json:"name"`
+}
+
+type Section struct {
+	GID  string `json:"gid"`
+	Name string `json:"name"`
+}
+
+type TaskMembership struct {
+	Project ProjectRef `json:"project"`
+	Section *Section   `json:"section,omitempty"`
 }
 
 type CustomFieldSetting struct {

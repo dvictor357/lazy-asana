@@ -187,7 +187,7 @@ func (c *Client) GetCustomFieldSettings(projectGID string) ([]CustomFieldSetting
 func (c *Client) SearchTasks(workspaceGID string, filters url.Values) ([]Task, error) {
 	params := url.Values{
 		"limit":      {"100"},
-		"opt_fields": {"name,notes,due_on,completed,assignee.name,custom_fields.name,custom_fields.number_value,custom_fields.gid"},
+		"opt_fields": {"name,notes,due_on,completed,assignee.name,custom_fields.name,custom_fields.number_value,custom_fields.gid,memberships.project.gid,memberships.project.name,memberships.section.gid,memberships.section.name"},
 	}
 	for k, v := range filters {
 		params[k] = v
@@ -266,6 +266,40 @@ func (c *Client) GetSubtasks(taskGID string) ([]Task, error) {
 	}
 	var tasks []Task
 	return tasks, json.Unmarshal(data, &tasks)
+}
+
+func (c *Client) ListSections(projectGID string) ([]Section, error) {
+	params := url.Values{
+		"limit":      {"100"},
+		"opt_fields": {"name"},
+	}
+	path := fmt.Sprintf("/projects/%s/sections", projectGID)
+	data, err := c.doPaginatedRequest(path, params)
+	if err != nil {
+		return nil, err
+	}
+	var sections []Section
+	return sections, json.Unmarshal(data, &sections)
+}
+
+// AddTaskToProject adds a task to a project, optionally placing it in a section.
+// Pass sectionGID="" to use the project's default section.
+func (c *Client) AddTaskToProject(taskGID, projectGID, sectionGID string) error {
+	data := map[string]interface{}{"project": projectGID}
+	if sectionGID != "" {
+		data["section"] = sectionGID
+	}
+	body := map[string]interface{}{"data": data}
+	_, err := c.doRequest("POST", fmt.Sprintf("/tasks/%s/addProject", taskGID), body)
+	return err
+}
+
+func (c *Client) RemoveTaskFromProject(taskGID, projectGID string) error {
+	body := map[string]interface{}{
+		"data": map[string]interface{}{"project": projectGID},
+	}
+	_, err := c.doRequest("POST", fmt.Sprintf("/tasks/%s/removeProject", taskGID), body)
+	return err
 }
 
 func (c *Client) UpdateTask(taskGID string, input map[string]interface{}) (*Task, error) {

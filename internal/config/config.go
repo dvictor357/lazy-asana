@@ -13,6 +13,7 @@ type Config struct {
 	DefaultWorkspaceGID string `json:"default_workspace_gid,omitempty"`
 	DefaultProjectGID   string `json:"default_project_gid,omitempty"`
 	ActualHoursFieldGID string `json:"actual_hours_field_gid,omitempty"`
+	UserGID             string `json:"user_gid,omitempty"`
 }
 
 func configPath() (string, error) {
