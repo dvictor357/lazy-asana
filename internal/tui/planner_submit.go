@@ -23,6 +23,13 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 	wsGID := m.cfg.DefaultWorkspaceGID
 	projGID := m.cfg.DefaultProjectGID
 	hoursFieldGID := m.cfg.ActualHoursFieldGID
+	userGID := m.cfg.UserGID
+	entityFieldGID := m.cfg.EntityFieldGID
+	entityFieldType := m.cfg.EntityFieldType
+	productFieldGID := m.cfg.ProductFieldGID
+	productFieldType := m.cfg.ProductFieldType
+	selectedEntities := m.selectedEntities
+	selectedProducts := m.selectedProducts
 
 	return func() tea.Msg {
 		input := map[string]interface{}{
@@ -30,14 +37,23 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 			"notes":     task.Description,
 			"projects":  []string{projGID},
 			"workspace": wsGID,
+			"completed": true,
+		}
+		if userGID != "" {
+			input["assignee"] = userGID
 		}
 		if task.DueDate != "" {
 			input["due_on"] = task.DueDate
 		}
+
+		customFields := map[string]interface{}{}
 		if hoursFieldGID != "" && task.Hours > 0 {
-			input["custom_fields"] = map[string]interface{}{
-				hoursFieldGID: task.Hours,
-			}
+			customFields[hoursFieldGID] = task.Hours
+		}
+		applyEnumField(customFields, entityFieldGID, entityFieldType, selectedEntities)
+		applyEnumField(customFields, productFieldGID, productFieldType, selectedProducts)
+		if len(customFields) > 0 {
+			input["custom_fields"] = customFields
 		}
 
 		created, err := m.asanaCli.CreateTask(input)
@@ -64,6 +80,28 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 		}
 
 		return submitResult{idx: idx + 1}
+	}
+}
+
+// applyEnumField sets enum or multi_enum custom field values into the map.
+func applyEnumField(customFields map[string]interface{}, fieldGID, fieldType string, selected map[string]bool) {
+	if fieldGID == "" || len(selected) == 0 {
+		return
+	}
+	var gids []string
+	for gid, on := range selected {
+		if on {
+			gids = append(gids, gid)
+		}
+	}
+	if len(gids) == 0 {
+		return
+	}
+	if fieldType == "multi_enum" {
+		customFields[fieldGID] = gids
+	} else {
+		// enum: single value only
+		customFields[fieldGID] = gids[0]
 	}
 }
 

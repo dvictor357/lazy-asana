@@ -37,6 +37,8 @@ type BindModel struct {
 	step          bindStep
 	asanaToken    textinput.Model
 	openrouter    textinput.Model
+	deepseek      textinput.Model
+	provider      string // "openrouter" or "deepseek"
 	cursor        int
 	workspaces    []asana.Workspace
 	projects      []asana.Project
@@ -55,9 +57,10 @@ func NewBindModel(cfg *config.Config) BindModel {
 	at.Placeholder = "pat/..."
 	at.EchoMode = textinput.EchoPassword
 	at.EchoCharacter = '•'
-	at.Focus()
 	at.CharLimit = 200
 	at.Width = 50
+	at.SetValue(cfg.AsanaToken)
+	at.Focus()
 
 	or := textinput.New()
 	or.Placeholder = "sk-or-..."
@@ -65,6 +68,15 @@ func NewBindModel(cfg *config.Config) BindModel {
 	or.EchoCharacter = '•'
 	or.CharLimit = 200
 	or.Width = 50
+	or.SetValue(cfg.OpenRouterKey)
+
+	ds := textinput.New()
+	ds.Placeholder = "sk-..."
+	ds.EchoMode = textinput.EchoPassword
+	ds.EchoCharacter = '•'
+	ds.CharLimit = 200
+	ds.Width = 50
+	ds.SetValue(cfg.DeepSeekKey)
 
 	ps := textinput.New()
 	ps.Placeholder = "type to filter..."
@@ -74,11 +86,18 @@ func NewBindModel(cfg *config.Config) BindModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
+	provider := cfg.LLMProvider
+	if provider == "" {
+		provider = "openrouter"
+	}
+
 	return BindModel{
 		cfg:        cfg,
 		step:       bindStepTokens,
 		asanaToken: at,
 		openrouter: or,
+		deepseek:   ds,
+		provider:   provider,
 		projSearch: ps,
 		spinner:    sp,
 	}
@@ -127,14 +146,32 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "tab", "shift+tab":
 			if m.step == bindStepTokens {
-				if m.cursor == 0 {
-					m.cursor = 1
-					m.asanaToken.Blur()
-					m.openrouter.Focus()
+				m.asanaToken.Blur()
+				m.openrouter.Blur()
+				m.deepseek.Blur()
+				const numFields = 3
+				if msg.String() == "tab" {
+					m.cursor = (m.cursor + 1) % numFields
 				} else {
-					m.cursor = 0
-					m.openrouter.Blur()
+					m.cursor = (m.cursor + numFields - 1) % numFields
+				}
+				switch m.cursor {
+				case 0:
 					m.asanaToken.Focus()
+				case 1:
+					m.openrouter.Focus()
+				case 2:
+					m.deepseek.Focus()
+				}
+			}
+			return m, nil
+
+		case "p":
+			if m.step == bindStepTokens {
+				if m.provider == "openrouter" {
+					m.provider = "deepseek"
+				} else {
+					m.provider = "openrouter"
 				}
 			}
 			return m, nil
@@ -209,6 +246,12 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err == nil {
 			m.hoursFieldGID = findActualHoursField(msg.settings)
+			entityGID, entityType := findEnumField(msg.settings, "company", "entity")
+			productGID, productType := findEnumField(msg.settings, "product", "project")
+			m.cfg.EntityFieldGID = entityGID
+			m.cfg.EntityFieldType = entityType
+			m.cfg.ProductFieldGID = productGID
+			m.cfg.ProductFieldType = productType
 		}
 		m.cfg.ActualHoursFieldGID = m.hoursFieldGID
 		if err := m.cfg.Save(); err != nil {
@@ -220,10 +263,13 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	if m.step == bindStepTokens {
-		if m.cursor == 0 {
+		switch m.cursor {
+		case 0:
 			m.asanaToken, cmd = m.asanaToken.Update(msg)
-		} else {
+		case 1:
 			m.openrouter, cmd = m.openrouter.Update(msg)
+		case 2:
+			m.deepseek, cmd = m.deepseek.Update(msg)
 		}
 	}
 	return m, cmd
@@ -242,6 +288,8 @@ func (m *BindModel) handleEnter() (tea.Model, tea.Cmd) {
 		m.step = bindStepWorkspace
 		m.cfg.AsanaToken = token
 		m.cfg.OpenRouterKey = m.openrouter.Value()
+		m.cfg.DeepSeekKey = m.deepseek.Value()
+		m.cfg.LLMProvider = m.provider
 		return *m, tea.Batch(m.validateAndFetch(token), m.spinner.Tick)
 
 	case bindStepWorkspace:
@@ -300,6 +348,21 @@ func (m BindModel) fetchCustomFields(projectGID string) tea.Cmd {
 	}
 }
 
+func findEnumField(settings []asana.CustomFieldSetting, keywords ...string) (gid, fieldType string) {
+	for _, s := range settings {
+		name := strings.ToLower(s.CustomField.Name)
+		for _, kw := range keywords {
+			if strings.Contains(name, kw) {
+				t := s.CustomField.Type
+				if t == "enum" || t == "multi_enum" {
+					return s.CustomField.GID, t
+				}
+			}
+		}
+	}
+	return "", ""
+}
+
 func findActualHoursField(settings []asana.CustomFieldSetting) string {
 	for _, s := range settings {
 		name := s.CustomField.Name
@@ -322,11 +385,27 @@ func (m BindModel) View() string {
 		s += "\n"
 		s += m.asanaToken.View()
 		s += "\n\n"
-		s += LabelStyle.Render("OpenRouter API Key (optional, for LLM features)")
+		s += LabelStyle.Render("OpenRouter API Key (optional)")
 		s += "\n"
 		s += m.openrouter.View()
 		s += "\n\n"
-		s += DimStyle.Render("tab to switch fields • enter to continue • esc to go back")
+		s += LabelStyle.Render("DeepSeek API Key (optional)")
+		s += "\n"
+		s += m.deepseek.View()
+		s += "\n\n"
+
+		orMark := "[ ]"
+		dsMark := "[ ]"
+		if m.provider == "deepseek" {
+			dsMark = "[x]"
+		} else {
+			orMark = "[x]"
+		}
+		s += LabelStyle.Render("Active LLM Provider:")
+		s += " " + DimStyle.Render(orMark+" openrouter")
+		s += "  " + DimStyle.Render(dsMark+" deepseek")
+		s += "\n\n"
+		s += DimStyle.Render("tab/shift+tab switch fields • p toggle provider • enter continue • esc back")
 
 		if m.err != "" {
 			s += "\n" + ErrorStyle.Render(m.err)

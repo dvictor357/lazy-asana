@@ -17,6 +17,7 @@ const (
 	plannerStepAddTask
 	plannerStepAddSubtask
 	plannerStepReview
+	plannerStepTagging
 	plannerStepConfirm
 	plannerStepSubmitting
 	plannerStepDone
@@ -47,15 +48,29 @@ type PlannerModel struct {
 	dateInput     textinput.Model
 	validationErr string
 
-	llmGenerating bool
-	llmResult     string
-	llmErr        string
-	llmContext    textarea.Model
+	llmGenerating  bool
+	llmResult      string
+	llmErr         string
+	llmContext     textarea.Model
+	llmStartDate   textinput.Model
+	llmFieldCursor int // 0=startDate, 1=days, 2=context
+	planDays       int
 
+	fieldCursor        int
+	llmDescGenerating  bool
 	submitIdx    int
 	submitErr    string
 	reviewCursor int
 	spinner      spinner.Model
+
+	// tagging step
+	entityOptions    []asana.EnumOption
+	productOptions   []asana.EnumOption
+	selectedEntities map[string]bool
+	selectedProducts map[string]bool
+	taggingSection   int // 0=entity, 1=product
+	taggingCursor    int
+	taggingLoading   bool
 }
 
 func NewPlannerModel(cfg *config.Config, asanaCli *asana.Client, llmCli *llm.Client) PlannerModel {
@@ -84,20 +99,27 @@ func NewPlannerModel(cfg *config.Config, asanaCli *asana.Client, llmCli *llm.Cli
 	lc.SetWidth(60)
 	lc.SetHeight(4)
 
+	sd := textinput.New()
+	sd.Placeholder = "2026-05-08"
+	sd.CharLimit = 10
+	sd.Width = 12
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
 	return PlannerModel{
-		cfg:        cfg,
-		asanaCli:   asanaCli,
-		llmCli:     llmCli,
-		step:       plannerStepMenu,
-		titleInput: ti,
-		descInput:  di,
-		hoursInput: hi,
-		dateInput:  dt,
-		llmContext: lc,
-		spinner:    sp,
+		cfg:          cfg,
+		asanaCli:     asanaCli,
+		llmCli:       llmCli,
+		step:         plannerStepMenu,
+		titleInput:   ti,
+		descInput:    di,
+		hoursInput:   hi,
+		dateInput:    dt,
+		llmContext:   lc,
+		llmStartDate: sd,
+		spinner:      sp,
+		planDays:     5,
 	}
 }
 

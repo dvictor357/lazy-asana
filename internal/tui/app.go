@@ -17,22 +17,24 @@ const (
 	screenPlanner
 	screenChat
 	screenMigrate
+	screenInsights
 )
 
 type App struct {
-	cfg     *config.Config
-	asana   *asana.Client
-	llm     *llm.Client
-	screen  screen
-	menu    MenuModel
-	bind    BindModel
-	hours   HoursModel
-	planner PlannerModel
-	chat    ChatModel
-	migrate MigrateModel
-	width   int
-	height  int
-	err     string
+	cfg      *config.Config
+	asana    *asana.Client
+	llm      *llm.Client
+	screen   screen
+	menu     MenuModel
+	bind     BindModel
+	hours    HoursModel
+	planner  PlannerModel
+	chat     ChatModel
+	migrate  MigrateModel
+	insights InsightsModel
+	width    int
+	height   int
+	err      string
 }
 
 func NewApp(cfg *config.Config) *App {
@@ -41,10 +43,7 @@ func NewApp(cfg *config.Config) *App {
 		ac = asana.NewClient(cfg.AsanaToken)
 	}
 
-	var lc *llm.Client
-	if cfg.OpenRouterKey != "" {
-		lc = llm.NewClient(cfg.OpenRouterKey, "")
-	}
+	lc := newLLMClient(cfg)
 
 	app := &App{
 		cfg:    cfg,
@@ -60,6 +59,7 @@ func NewApp(cfg *config.Config) *App {
 	} else {
 		app.hours = NewHoursModel(cfg, ac)
 		app.planner = NewPlannerModel(cfg, ac, lc)
+		app.insights = NewInsightsModel(cfg, ac)
 		if lc != nil {
 			app.chat = NewChatModel(lc)
 		}
@@ -99,6 +99,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.menu = NewMenu(a.cfg.IsBound())
 		case screenMigrate:
 			a.migrate = NewMigrateModel(a.cfg, a.asana)
+		case screenInsights:
+			a.insights = NewInsightsModel(a.cfg, a.asana)
 		}
 		return a, nil
 	case ErrorMsg:
@@ -107,9 +109,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BindCompleteMsg:
 		a.cfg = msg.Config
 		a.asana = asana.NewClient(a.cfg.AsanaToken)
-		a.llm = llm.NewClient(a.cfg.OpenRouterKey, "")
+		a.llm = newLLMClient(a.cfg)
 		a.hours = NewHoursModel(a.cfg, a.asana)
 		a.planner = NewPlannerModel(a.cfg, a.asana, a.llm)
+		a.insights = NewInsightsModel(a.cfg, a.asana)
 		a.chat = NewChatModel(a.llm)
 		a.screen = screenMenu
 		a.menu = NewMenu(true)
@@ -142,6 +145,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, c := a.migrate.Update(msg)
 		a.migrate = m.(MigrateModel)
 		cmd = c
+	case screenInsights:
+		m, c := a.insights.Update(msg)
+		a.insights = m.(InsightsModel)
+		cmd = c
 	}
 	return a, cmd
 }
@@ -161,6 +168,8 @@ func (a *App) View() string {
 		content = a.chat.View()
 	case screenMigrate:
 		content = a.migrate.View()
+	case screenInsights:
+		content = a.insights.View()
 	}
 
 	if a.err != "" {
@@ -179,4 +188,25 @@ type ErrorMsg struct {
 
 type BindCompleteMsg struct {
 	Config *config.Config
+}
+
+func newLLMClient(cfg *config.Config) *llm.Client {
+	switch cfg.LLMProvider {
+	case "deepseek":
+		if cfg.DeepSeekKey != "" {
+			return llm.NewDeepSeekClient(cfg.DeepSeekKey, "")
+		}
+	default:
+		if cfg.OpenRouterKey != "" {
+			return llm.NewClient(cfg.OpenRouterKey, "")
+		}
+	}
+	// fallback: use whichever key is available
+	if cfg.DeepSeekKey != "" {
+		return llm.NewDeepSeekClient(cfg.DeepSeekKey, "")
+	}
+	if cfg.OpenRouterKey != "" {
+		return llm.NewClient(cfg.OpenRouterKey, "")
+	}
+	return nil
 }

@@ -201,6 +201,26 @@ func (c *Client) SearchTasks(workspaceGID string, filters url.Values) ([]Task, e
 	return tasks, json.Unmarshal(data, &tasks)
 }
 
+func (c *Client) GetWeekTasks(workspaceGID, projectGID, userGID, from, to string) ([]Task, error) {
+	fromDate, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return nil, err
+	}
+	toDate, err := time.Parse("2006-01-02", to)
+	if err != nil {
+		return nil, err
+	}
+	filters := url.Values{
+		"due_on.after":  {fromDate.AddDate(0, 0, -1).Format("2006-01-02")},
+		"due_on.before": {toDate.AddDate(0, 0, 1).Format("2006-01-02")},
+		"projects.any":  {projectGID},
+	}
+	if userGID != "" {
+		filters.Set("assignee.any", userGID)
+	}
+	return c.SearchTasks(workspaceGID, filters)
+}
+
 func (c *Client) ListTasksByProject(projectGID string) ([]Task, error) {
 	params := url.Values{
 		"limit":           {"100"},

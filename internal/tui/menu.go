@@ -24,6 +24,7 @@ func NewMenu(bound bool) MenuModel {
 		{title: "Show Week Hours", desc: "View actual hours for a given week"},
 		{title: "Plan Day/Week", desc: "Plan and create tasks with LLM assistance"},
 		{title: "Move Tasks", desc: "Move tasks between projects by date range"},
+		{title: "Insights", desc: "Interactive weekly/monthly hours breakdown with charts"},
 	}
 	return MenuModel{items: items, bound: bound}
 }
@@ -63,6 +64,11 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, func() tea.Msg { return ErrorMsg{Message: "please bind your account first"} }
 				}
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMigrate} }
+			case 4:
+				if !m.bound {
+					return m, func() tea.Msg { return ErrorMsg{Message: "please bind your account first"} }
+				}
+				return m, func() tea.Msg { return ScreenMsg{Screen: screenInsights} }
 			}
 		case "q":
 			return m, tea.Quit

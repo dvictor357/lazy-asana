@@ -10,9 +10,15 @@ import (
 type Config struct {
 	AsanaToken          string `json:"asana_token,omitempty"`
 	OpenRouterKey       string `json:"openrouter_key,omitempty"`
+	DeepSeekKey         string `json:"deepseek_key,omitempty"`
+	LLMProvider         string `json:"llm_provider,omitempty"`
 	DefaultWorkspaceGID string `json:"default_workspace_gid,omitempty"`
 	DefaultProjectGID   string `json:"default_project_gid,omitempty"`
 	ActualHoursFieldGID string `json:"actual_hours_field_gid,omitempty"`
+	EntityFieldGID      string `json:"entity_field_gid,omitempty"`
+	EntityFieldType     string `json:"entity_field_type,omitempty"`
+	ProductFieldGID     string `json:"product_field_gid,omitempty"`
+	ProductFieldType    string `json:"product_field_type,omitempty"`
 	UserGID             string `json:"user_gid,omitempty"`
 }
 

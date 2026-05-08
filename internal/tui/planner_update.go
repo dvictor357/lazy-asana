@@ -39,7 +39,9 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddTask(msg)
 	case plannerStepReview:
 		return m.updateReview(msg)
-	case plannerStepConfirm:
+	case plannerStepTagging:
+		return m.updateTagging(msg)
+	case plannerStepConfirm, plannerStepSubmitting:
 		return m.updateConfirm(msg)
 	case plannerStepLLMPlan:
 		return m.updateLLMPlan(msg)
@@ -69,11 +71,16 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.menuIdx {
 		case 0:
 			m.step = plannerStepAddTask
+			m.fieldCursor = 0
 			m.titleInput.SetValue("")
 			m.descInput.SetValue("")
 			m.hoursInput.SetValue("")
 			m.dateInput.SetValue("")
+			m.descInput.Blur()
+			m.hoursInput.Blur()
+			m.dateInput.Blur()
 			m.titleInput.Focus()
+			m.validationErr = ""
 			return *m, nil
 		case 1:
 			if len(m.tasks) == 0 {
@@ -81,19 +88,28 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.step = plannerStepAddSubtask
 			m.subParent = m.cursor
+			m.fieldCursor = 0
 			m.titleInput.SetValue("")
 			m.descInput.SetValue("")
 			m.hoursInput.SetValue("")
+			m.dateInput.SetValue("")
+			m.descInput.Blur()
+			m.hoursInput.Blur()
+			m.dateInput.Blur()
 			m.titleInput.Focus()
+			m.validationErr = ""
 			return *m, nil
 		case 2:
 			if m.llmCli == nil {
-				return *m, func() tea.Msg { return ErrorMsg{Message: "no OpenRouter key configured"} }
+				return *m, func() tea.Msg { return ErrorMsg{Message: "no LLM key configured"} }
 			}
 			m.step = plannerStepLLMPlan
 			m.llmContext.SetValue("")
-			m.llmContext.Focus()
+			m.llmContext.Blur()
+			m.llmStartDate.SetValue("")
+			m.llmStartDate.Focus()
 			m.llmErr = ""
+			m.llmFieldCursor = 0
 			return *m, nil
 		case 3:
 			if len(m.tasks) == 0 {
@@ -113,31 +129,76 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
-		var cmds []tea.Cmd
-		var cmd tea.Cmd
-		m.titleInput, cmd = m.titleInput.Update(msg)
-		cmds = append(cmds, cmd)
-		m.descInput, cmd = m.descInput.Update(msg)
-		cmds = append(cmds, cmd)
-		m.hoursInput, cmd = m.hoursInput.Update(msg)
-		cmds = append(cmds, cmd)
-		m.dateInput, cmd = m.dateInput.Update(msg)
-		cmds = append(cmds, cmd)
-		return *m, tea.Batch(cmds...)
+		if t, ok2 := msg.(llmDescResult); ok2 {
+			m.llmDescGenerating = false
+			if t.err == "" && t.desc != "" {
+				m.descInput.SetValue(t.desc)
+			} else if t.err != "" {
+				m.validationErr = "LLM error: " + t.err
+			}
+			return *m, nil
+		}
+		return m.updateFocusedField(msg)
 	}
 
 	switch k.String() {
 	case "tab":
-		return *m, m.handleGenerateDescription()
+		m.cycleField(1)
+		return *m, nil
+	case "shift+tab":
+		m.cycleField(-1)
+		return *m, nil
+	case "ctrl+g":
+		cmd := m.handleGenerateDescription()
+		if cmd != nil {
+			m.llmDescGenerating = true
+		}
+		return *m, cmd
+	case "ctrl+s":
+		return *m, m.handleSaveTask()
 	case "enter":
+		if m.fieldCursor == 1 {
+			// description textarea: pass enter through for newline
+			var cmd tea.Cmd
+			m.descInput, cmd = m.descInput.Update(msg)
+			return *m, cmd
+		}
 		return *m, m.handleSaveTask()
 	}
 
+	return m.updateFocusedField(msg)
+}
+
+func (m *PlannerModel) cycleField(dir int) {
+	m.titleInput.Blur()
+	m.descInput.Blur()
+	m.hoursInput.Blur()
+	m.dateInput.Blur()
+	m.fieldCursor = ((m.fieldCursor + dir) % 4 + 4) % 4
+	switch m.fieldCursor {
+	case 0:
+		m.titleInput.Focus()
+	case 1:
+		m.descInput.Focus()
+	case 2:
+		m.hoursInput.Focus()
+	case 3:
+		m.dateInput.Focus()
+	}
+}
+
+func (m *PlannerModel) updateFocusedField(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.titleInput, cmd = m.titleInput.Update(msg)
-	m.descInput, _ = m.descInput.Update(msg)
-	m.hoursInput, _ = m.hoursInput.Update(msg)
-	m.dateInput, _ = m.dateInput.Update(msg)
+	switch m.fieldCursor {
+	case 0:
+		m.titleInput, cmd = m.titleInput.Update(msg)
+	case 1:
+		m.descInput, cmd = m.descInput.Update(msg)
+	case 2:
+		m.hoursInput, cmd = m.hoursInput.Update(msg)
+	case 3:
+		m.dateInput, cmd = m.dateInput.Update(msg)
+	}
 	return *m, cmd
 }
 
@@ -220,6 +281,15 @@ func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if len(m.tasks) > 0 {
+			if m.cfg.EntityFieldGID != "" || m.cfg.ProductFieldGID != "" {
+				m.step = plannerStepTagging
+				m.taggingLoading = true
+				m.taggingSection = 0
+				m.taggingCursor = 0
+				m.selectedEntities = map[string]bool{}
+				m.selectedProducts = map[string]bool{}
+				return *m, tea.Batch(m.fetchTagOptions(), m.spinner.Tick)
+			}
 			m.step = plannerStepConfirm
 		}
 	}

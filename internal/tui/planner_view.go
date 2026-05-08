@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/dvictor357/lazy-asana/internal/asana"
 )
 
 func (m PlannerModel) View() string {
@@ -20,6 +21,8 @@ func (m PlannerModel) View() string {
 		s += m.viewAddTask(fmt.Sprintf("Add Subtask to: %s", m.tasks[m.subParent].Title))
 	case plannerStepReview:
 		s += m.viewReview()
+	case plannerStepTagging:
+		s += m.viewTagging()
 	case plannerStepConfirm:
 		s += m.viewConfirm()
 	case plannerStepSubmitting:
@@ -104,27 +107,46 @@ func (m PlannerModel) viewAddTask(header string) string {
 	b.WriteString(HeaderStyle.Render(header))
 	b.WriteString("\n\n")
 
-	b.WriteString(LabelStyle.Render("Title"))
+	fieldLabel := func(label string, idx int) string {
+		if m.fieldCursor == idx {
+			return HighlightStyle.Render("> " + label)
+		}
+		return LabelStyle.Render("  " + label)
+	}
+
+	b.WriteString(fieldLabel("Title", 0))
 	b.WriteString("\n")
 	b.WriteString(m.titleInput.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(LabelStyle.Render("Description"))
+	descLabel := "Description"
+	if m.llmDescGenerating {
+		descLabel = "Description (generating...)"
+	}
+	b.WriteString(fieldLabel(descLabel, 1))
 	b.WriteString("\n")
 	b.WriteString(m.descInput.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(LabelStyle.Render("Actual Hours"))
+	b.WriteString(fieldLabel("Actual Hours", 2))
 	b.WriteString("\n")
 	b.WriteString(m.hoursInput.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(LabelStyle.Render("Due Date (YYYY-MM-DD)"))
+	b.WriteString(fieldLabel("Due Date (YYYY-MM-DD)", 3))
 	b.WriteString("\n")
 	b.WriteString(m.dateInput.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(DimStyle.Render("enter save • tab generate description with LLM • esc cancel"))
+	hint := "tab/shift+tab switch fields • enter save"
+	if m.fieldCursor == 1 {
+		hint = "tab/shift+tab switch fields • ctrl+s save • enter newline"
+	}
+	if m.llmCli != nil && m.titleInput.Value() != "" {
+		hint += " • ctrl+g generate description"
+	}
+	hint += " • esc cancel"
+	b.WriteString(DimStyle.Render(hint))
 
 	if m.validationErr != "" {
 		b.WriteString("\n" + ErrorStyle.Render(m.validationErr))
@@ -138,13 +160,40 @@ func (m PlannerModel) viewReview() string {
 	b.WriteString(HeaderStyle.Render("Review & Submit"))
 	b.WriteString("\n\n")
 
+	const pageSize = 5
+	total := len(m.tasks)
+	start := m.reviewCursor - pageSize/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+		start = end - pageSize
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	if start > 0 {
+		b.WriteString(DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+		b.WriteString("\n")
+	}
+
 	totalHours := 0.0
-	for i, t := range m.tasks {
+	for _, t := range m.tasks {
+		totalHours += t.Hours
+		for _, sub := range t.Subtasks {
+			totalHours += sub.Hours
+		}
+	}
+
+	for i := start; i < end; i++ {
+		t := m.tasks[i]
 		hoursStr := ""
 		if t.Hours > 0 {
 			hoursStr = fmt.Sprintf(" (%.1fh)", t.Hours)
 		}
-		totalHours += t.Hours
 
 		cursor := "  "
 		style := ValueStyle
@@ -167,14 +216,19 @@ func (m PlannerModel) viewReview() string {
 			if sub.Hours > 0 {
 				subH = fmt.Sprintf(" (%.1fh)", sub.Hours)
 			}
-			totalHours += sub.Hours
 			b.WriteString(DimStyle.Render(fmt.Sprintf("   └ %s%s", sub.Title, subH)))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
 	}
 
-	b.WriteString(HighlightStyle.Render(fmt.Sprintf("Total: %.1f hours across %d tasks", totalHours, len(m.tasks))))
+	if end < total {
+		b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", total-end)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HighlightStyle.Render(fmt.Sprintf("Total: %.1f hours across %d tasks", totalHours, total)))
 	b.WriteString("\n\n")
 	b.WriteString(DimStyle.Render("↑/k↓/j navigate • d delete task • enter submit • esc go back"))
 
@@ -182,6 +236,74 @@ func (m PlannerModel) viewReview() string {
 		b.WriteString("\n" + ErrorStyle.Render(m.submitErr))
 	}
 
+	return b.String()
+}
+
+func (m PlannerModel) viewTagging() string {
+	var b strings.Builder
+	b.WriteString(HeaderStyle.Render("Tag Tasks"))
+	b.WriteString("\n\n")
+
+	if m.taggingLoading {
+		b.WriteString(m.spinner.View() + " Loading options...\n")
+		return b.String()
+	}
+
+	const pageSize = 10
+	renderSection := func(label string, opts []asana.EnumOption, selected map[string]bool, active bool, cursor int) {
+		sectionStyle := LabelStyle
+		prefix := "  "
+		if active {
+			sectionStyle = HighlightStyle
+			prefix = "> "
+		}
+		b.WriteString(sectionStyle.Render(prefix + label))
+		b.WriteString("\n")
+		if len(opts) == 0 {
+			b.WriteString(DimStyle.Render("  (no options)"))
+			b.WriteString("\n")
+		} else {
+			start := cursor - pageSize/2
+			if start < 0 {
+				start = 0
+			}
+			end := start + pageSize
+			if end > len(opts) {
+				end = len(opts)
+				start = end - pageSize
+				if start < 0 {
+					start = 0
+				}
+			}
+			if start > 0 {
+				b.WriteString(DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
+				b.WriteString("\n")
+			}
+			for i := start; i < end; i++ {
+				opt := opts[i]
+				check := "[ ]"
+				if selected[opt.GID] {
+					check = "[x]"
+				}
+				style := ValueStyle
+				if active && i == cursor {
+					style = HighlightStyle
+				}
+				b.WriteString(style.Render(fmt.Sprintf("  %s %s", check, opt.Name)))
+				b.WriteString("\n")
+			}
+			if end < len(opts) {
+				b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", len(opts)-end)))
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	renderSection("Company/Entity", m.entityOptions, m.selectedEntities, m.taggingSection == 0, m.taggingCursor)
+	renderSection("Product/Project", m.productOptions, m.selectedProducts, m.taggingSection == 1, m.taggingCursor)
+
+	b.WriteString(DimStyle.Render("↑/k↓/j navigate • space toggle • tab switch section • enter confirm • esc back"))
 	return b.String()
 }
 
@@ -205,7 +327,27 @@ func (m PlannerModel) viewLLMPlan() string {
 		return b.String()
 	}
 
-	b.WriteString(LabelStyle.Render("Describe what you want to plan:"))
+	llmFieldLabel := func(label string, idx int) string {
+		if m.llmFieldCursor == idx {
+			return HighlightStyle.Render("> " + label)
+		}
+		return LabelStyle.Render("  " + label)
+	}
+
+	// Start date
+	b.WriteString(llmFieldLabel("Start Date (YYYY-MM-DD, leave empty for today)", 0))
+	b.WriteString("\n")
+	b.WriteString(m.llmStartDate.View())
+	b.WriteString("\n\n")
+
+	// Days selector
+	b.WriteString(llmFieldLabel("Days to plan", 1))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  ← %s →", HighlightStyle.Render(fmt.Sprintf(" %d ", m.planDays))))
+	b.WriteString("\n\n")
+
+	// Context textarea
+	b.WriteString(llmFieldLabel("Describe what you want to plan", 2))
 	b.WriteString("\n")
 	b.WriteString(m.llmContext.View())
 	b.WriteString("\n\n")
@@ -215,6 +357,13 @@ func (m PlannerModel) viewLLMPlan() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(DimStyle.Render("enter generate plan • esc cancel"))
+	switch m.llmFieldCursor {
+	case 0:
+		b.WriteString(DimStyle.Render("tab/enter next field • esc cancel"))
+	case 1:
+		b.WriteString(DimStyle.Render("← → change days • tab/enter next field • shift+tab back • esc cancel"))
+	case 2:
+		b.WriteString(DimStyle.Render("enter generate • shift+tab back • ctrl+s submit existing • esc cancel"))
+	}
 	return b.String()
 }
