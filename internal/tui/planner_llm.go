@@ -19,8 +19,7 @@ func (m *PlannerModel) updateLLMPlan(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case llmPlanResult:
 			m.llmGenerating = false
 			if t.err != "" {
-				m.llmErr = t.err
-				return *m, nil
+				return *m, func() tea.Msg { return ErrorMsg{Message: t.err} }
 			}
 			for _, pt := range t.tasks {
 				m.tasks = append(m.tasks, PlanTask{
@@ -53,10 +52,10 @@ func (m *PlannerModel) updateLLMPlan(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch k.String() {
-	case "tab":
+	case "tab", "ctrl+f":
 		m.cycleLLMField(1)
 		return *m, nil
-	case "shift+tab":
+	case "shift+tab", "ctrl+b":
 		m.cycleLLMField(-1)
 		return *m, nil
 
@@ -151,7 +150,7 @@ func (m *PlannerModel) cycleLLMField(dir int) {
 	const n = 3
 	m.llmStartDate.Blur()
 	m.llmContext.Blur()
-	m.llmFieldCursor = ((m.llmFieldCursor + dir) % n + n) % n
+	m.llmFieldCursor = ((m.llmFieldCursor+dir)%n + n) % n
 	switch m.llmFieldCursor {
 	case 0:
 		m.llmStartDate.Focus()

@@ -16,17 +16,16 @@ type chatResponse struct {
 }
 
 type ChatModel struct {
-	client   *llm.Client
+	client   llm.LLMClient
 	history  []llm.Message
 	viewport viewport.Model
 	input    textarea.Model
 	loading  bool
-	err      string
 	width    int
 	height   int
 }
 
-func NewChatModel(client *llm.Client) ChatModel {
+func NewChatModel(client llm.LLMClient) ChatModel {
 	vp := viewport.New(60, 15)
 
 	ta := textarea.New()
@@ -57,13 +56,12 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			return m, func() tea.Msg { return ScreenMsg{Screen: screenPlanner} }
+			return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 		}
 	case chatResponse:
 		m.loading = false
 		if msg.err != nil {
-			m.err = msg.err.Error()
-			return m, nil
+			return m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
 		}
 		m.history = append(m.history, llm.Message{Role: "assistant", Content: msg.content})
 		m.refreshViewport()
@@ -82,8 +80,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.history = append(m.history, llm.Message{Role: "user", Content: text})
 				m.refreshViewport()
 				m.loading = true
-				m.err = ""
-				return m, m.sendChat(text)
+				return m, tea.Batch(m.sendChat(text), func() tea.Msg { return ErrorMsg{Message: ""} })
 			}
 		}
 		return m, cmd
@@ -134,11 +131,7 @@ func (m ChatModel) View() string {
 		s += DimStyle.Render("Thinking...")
 	} else {
 		s += m.input.View()
-		s += "\n" + DimStyle.Render("enter send • esc back to planner")
-	}
-
-	if m.err != "" {
-		s += "\n" + ErrorStyle.Render(m.err)
+		s += "\n" + DimStyle.Render("enter send • esc back to menu")
 	}
 
 	return lipgloss.NewStyle().Padding(2, 4).Render(s)

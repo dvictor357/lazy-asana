@@ -23,33 +23,32 @@ const (
 )
 
 type hoursResult struct {
-	tasks      []asana.Task
-	dateStart  string
-	dateEnd    string
-	weekNum    int
-	err        error
+	tasks     []asana.Task
+	dateStart string
+	dateEnd   string
+	weekNum   int
+	err       error
 }
 
 type HoursModel struct {
-	cfg       *config.Config
-	client    *asana.Client
-	step      hoursStep
-	mode      int
-	width     int // terminal width from WindowSizeMsg
-	weekInput textinput.Model
-	dateStart textinput.Model
-	dateEnd   textinput.Model
+	cfg          *config.Config
+	client       asana.AsanaClient
+	step         hoursStep
+	mode         int
+	width        int // terminal width from WindowSizeMsg
+	weekInput    textinput.Model
+	dateStart    textinput.Model
+	dateEnd      textinput.Model
 	tasks        []asana.Task
 	total        float64
 	fetchedStart string
 	fetchedEnd   string
 	weekNum      int
 	cursor       int
-	err          string
 	spinner      spinner.Model
 }
 
-func NewHoursModel(cfg *config.Config, client *asana.Client) HoursModel {
+func NewHoursModel(cfg *config.Config, client asana.AsanaClient) HoursModel {
 	wi := textinput.New()
 	wi.Placeholder = fmt.Sprintf("%d", asana.CurrentWeek())
 	wi.CharLimit = 2
@@ -102,8 +101,7 @@ func (m HoursModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.step == hoursStepView {
 				m.step = hoursStepInput
 				m.tasks = nil
-				m.err = ""
-				return m, nil
+				return m, func() tea.Msg { return ErrorMsg{Message: ""} }
 			}
 			return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 
@@ -112,21 +110,23 @@ func (m HoursModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 			}
 
-		case "up", "k":
+		case "up", "k", "ctrl+p":
 			if m.step == hoursStepView && m.cursor > 0 {
 				m.cursor--
 				return m, nil
 			}
 
-		case "down", "j":
+		case "down", "j", "ctrl+n":
 			if m.step == hoursStepView && m.cursor < len(m.tasks)-1 {
 				m.cursor++
 				return m, nil
 			}
 
-		case "tab", "shift+tab":
+		case "tab", "ctrl+f":
+			fallthrough
+		case "shift+tab", "ctrl+b":
 			if m.step == hoursStepInput {
-				forward := msg.String() == "tab"
+				forward := msg.String() == "tab" || msg.String() == "ctrl+f"
 				if m.mode == 0 {
 					if forward {
 						// week → dateStart
@@ -180,8 +180,7 @@ func (m HoursModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hoursResult:
 		m.step = hoursStepView
 		if msg.err != nil {
-			m.err = msg.err.Error()
-			return m, nil
+			return m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
 		}
 		m.tasks = msg.tasks
 		m.fetchedStart = msg.dateStart
@@ -214,8 +213,9 @@ func (m HoursModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *HoursModel) handleFetch() (tea.Model, tea.Cmd) {
 	if m.client == nil {
-		m.err = "asana client not configured — please bind your account first"
-		return *m, nil
+		return *m, func() tea.Msg {
+			return ErrorMsg{Message: "asana client not configured — please bind your account first"}
+		}
 	}
 
 	var dateStart, dateEnd string
@@ -229,32 +229,25 @@ func (m *HoursModel) handleFetch() (tea.Model, tea.Cmd) {
 			fmt.Sscanf(weekStr, "%d", &weekNum)
 		}
 		if err := asana.ValidateWeek(asana.CurrentYear(), weekNum); err != nil {
-			m.err = fmt.Sprintf("invalid week: %s", err)
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: fmt.Sprintf("invalid week: %s", err)} }
 		}
 		dateStart, dateEnd = asana.WeekToDateRange(asana.CurrentYear(), weekNum)
 	} else {
 		dateStart = m.dateStart.Value()
 		dateEnd = m.dateEnd.Value()
 		if err := asana.ValidateDate(dateStart); err != nil {
-			m.err = "invalid start date — use YYYY-MM-DD"
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: "invalid start date — use YYYY-MM-DD"} }
 		}
 		if err := asana.ValidateDate(dateEnd); err != nil {
-			m.err = "invalid end date — use YYYY-MM-DD"
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: "invalid end date — use YYYY-MM-DD"} }
 		}
 	}
 
 	m.step = hoursStepLoading
-	m.err = ""
 
 	wsGID := m.cfg.DefaultWorkspaceGID
 	projGID := m.cfg.DefaultProjectGID
 	userGID := m.cfg.UserGID
-	fieldGID := m.cfg.ActualHoursFieldGID
-
-	_ = fieldGID // used in result handler via cfg
 
 	return *m, tea.Batch(func() tea.Msg {
 		// due_on.after and due_on.before are exclusive, so shift by 1 day
@@ -325,10 +318,6 @@ func (m HoursModel) viewInput() string {
 		b.WriteString("\n\n" + ErrorStyle.Render("warning: no user ID saved — results will show all assignees. Re-bind to fix."))
 	}
 
-	if m.err != "" {
-		b.WriteString("\n" + ErrorStyle.Render(m.err))
-	}
-
 	return b.String()
 }
 
@@ -350,10 +339,6 @@ func (m HoursModel) viewResults() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-
-	if m.err != "" {
-		b.WriteString(ErrorStyle.Render(m.err) + "\n\n")
-	}
 
 	if len(m.tasks) == 0 {
 		b.WriteString(DimStyle.Render("No tasks found for this period."))

@@ -58,16 +58,16 @@ func (m *PlannerModel) updateTagging(msg tea.Msg) (tea.Model, tea.Cmd) {
 	currentOptions := m.currentTagOptions()
 
 	switch k.String() {
-	case "tab", "shift+tab":
+	case "tab", "shift+tab", "ctrl+f", "ctrl+b":
 		m.taggingSection = 1 - m.taggingSection
 		m.taggingCursor = 0
 
-	case "up", "k":
+	case "up", "k", "ctrl+p":
 		if m.taggingCursor > 0 {
 			m.taggingCursor--
 		}
 
-	case "down", "j":
+	case "down", "j", "ctrl+n":
 		if m.taggingCursor < len(currentOptions)-1 {
 			m.taggingCursor++
 		}

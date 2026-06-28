@@ -6,14 +6,14 @@ import (
 )
 
 type Task struct {
-	GID          string        `json:"gid"`
-	Name         string        `json:"name"`
-	Notes        string        `json:"notes"`
-	Assignee     *UserRef      `json:"assignee,omitempty"`
-	Projects     []ProjectRef  `json:"projects,omitempty"`
-	DueOn        string        `json:"due_on,omitempty"`
-	Completed    bool          `json:"completed"`
-	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
+	GID          string           `json:"gid"`
+	Name         string           `json:"name"`
+	Notes        string           `json:"notes"`
+	Assignee     *UserRef         `json:"assignee,omitempty"`
+	Projects     []ProjectRef     `json:"projects,omitempty"`
+	DueOn        string           `json:"due_on,omitempty"`
+	Completed    bool             `json:"completed"`
+	CompletedAt  *time.Time       `json:"completed_at,omitempty"`
 	CustomFields []CustomField    `json:"custom_fields,omitempty"`
 	Memberships  []TaskMembership `json:"memberships,omitempty"`
 	Parent       *TaskRef         `json:"parent,omitempty"`

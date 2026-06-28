@@ -17,6 +17,7 @@ type bindStep int
 const (
 	bindStepTokens bindStep = iota
 	bindStepWorkspace
+	bindStepRescanFields
 	bindStepDone
 )
 
@@ -47,7 +48,6 @@ type BindModel struct {
 	projSearch    textinput.Model
 	loading       bool
 	status        string
-	err           string
 	hoursFieldGID string
 	spinner       spinner.Model
 }
@@ -144,13 +144,15 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 
-		case "tab", "shift+tab":
+		case "tab", "ctrl+f":
+			fallthrough
+		case "shift+tab", "ctrl+b":
 			if m.step == bindStepTokens {
 				m.asanaToken.Blur()
 				m.openrouter.Blur()
 				m.deepseek.Blur()
 				const numFields = 3
-				if msg.String() == "tab" {
+				if msg.String() == "tab" || msg.String() == "ctrl+f" {
 					m.cursor = (m.cursor + 1) % numFields
 				} else {
 					m.cursor = (m.cursor + numFields - 1) % numFields
@@ -176,7 +178,15 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "up", "k":
+		case "ctrl+r":
+			if m.step == bindStepTokens && m.cfg.IsBound() && m.cfg.DefaultProjectGID != "" {
+				m.step = bindStepRescanFields
+				m.loading = true
+				return m, tea.Batch(m.fetchCustomFields(m.cfg.DefaultProjectGID), m.spinner.Tick)
+			}
+			return m, nil
+
+		case "up", "k", "ctrl+p":
 			if showingProjects {
 				if m.projCursor > 0 {
 					m.projCursor--
@@ -188,7 +198,7 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "down", "j":
+		case "down", "j", "ctrl+n":
 			if showingProjects {
 				filtered := m.filteredProjects()
 				if m.projCursor < len(filtered)-1 {
@@ -220,8 +230,7 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.step == bindStepWorkspace {
 			m.loading = false
 			if msg.err != nil {
-				m.err = msg.err.Error()
-				return m, nil
+				return m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
 			}
 			if msg.userGID != "" {
 				m.cfg.UserGID = msg.userGID
@@ -252,11 +261,20 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.EntityFieldType = entityType
 			m.cfg.ProductFieldGID = productGID
 			m.cfg.ProductFieldType = productType
+		} else {
+			if m.step == bindStepRescanFields {
+				m.step = bindStepTokens
+				m.asanaToken.Focus()
+			}
+			return m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
 		}
 		m.cfg.ActualHoursFieldGID = m.hoursFieldGID
 		if err := m.cfg.Save(); err != nil {
-			m.err = err.Error()
-			return m, nil
+			if m.step == bindStepRescanFields {
+				m.step = bindStepTokens
+				m.asanaToken.Focus()
+			}
+			return m, func() tea.Msg { return ErrorMsg{Message: err.Error()} }
 		}
 		return m, func() tea.Msg { return BindCompleteMsg{Config: m.cfg} }
 	}
@@ -280,17 +298,19 @@ func (m *BindModel) handleEnter() (tea.Model, tea.Cmd) {
 	case bindStepTokens:
 		token := m.asanaToken.Value()
 		if token == "" {
-			m.err = "asana token is required"
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: "asana token is required"} }
 		}
-		m.err = ""
 		m.loading = true
 		m.step = bindStepWorkspace
 		m.cfg.AsanaToken = token
 		m.cfg.OpenRouterKey = m.openrouter.Value()
 		m.cfg.DeepSeekKey = m.deepseek.Value()
 		m.cfg.LLMProvider = m.provider
-		return *m, tea.Batch(m.validateAndFetch(token), m.spinner.Tick)
+		return *m, tea.Batch(
+			func() tea.Msg { return ErrorMsg{Message: ""} },
+			m.validateAndFetch(token),
+			m.spinner.Tick,
+		)
 
 	case bindStepWorkspace:
 		if len(m.projects) == 0 {
@@ -380,6 +400,10 @@ func (m BindModel) View() string {
 	s := WindowTitle.Render("Bind Account")
 	s += "\n\n"
 
+	if m.step == bindStepRescanFields {
+		s += m.spinner.View() + " Re-scanning custom fields...\n"
+	}
+
 	if m.step == bindStepTokens {
 		s += LabelStyle.Render("Asana Personal Access Token")
 		s += "\n"
@@ -405,11 +429,7 @@ func (m BindModel) View() string {
 		s += " " + DimStyle.Render(orMark+" openrouter")
 		s += "  " + DimStyle.Render(dsMark+" deepseek")
 		s += "\n\n"
-		s += DimStyle.Render("tab/shift+tab switch fields • p toggle provider • enter continue • esc back")
-
-		if m.err != "" {
-			s += "\n" + ErrorStyle.Render(m.err)
-		}
+		s += DimStyle.Render("tab/shift+tab switch fields • p toggle provider • ctrl+r re-scan fields • enter continue • esc back")
 	}
 
 	if m.step == bindStepWorkspace {
@@ -497,10 +517,6 @@ func (m BindModel) View() string {
 			}
 
 			s += "\n" + DimStyle.Render("type to search • ↑/k↓/j navigate • enter confirm • esc back")
-		}
-
-		if m.err != "" {
-			s += "\n" + ErrorStyle.Render(m.err)
 		}
 	}
 

@@ -34,34 +34,31 @@ type PlanTask struct {
 
 type PlannerModel struct {
 	cfg       *config.Config
-	asanaCli  *asana.Client
-	llmCli    *llm.Client
+	asanaCli  asana.AsanaClient
+	llmCli    llm.LLMClient
 	step      plannerStep
 	menuIdx   int
 	tasks     []PlanTask
 	cursor    int
 	subParent int
 
-	titleInput    textinput.Model
-	descInput     textarea.Model
-	hoursInput    textinput.Model
-	dateInput     textinput.Model
-	validationErr string
+	titleInput textinput.Model
+	descInput  textarea.Model
+	hoursInput textinput.Model
+	dateInput  textinput.Model
 
 	llmGenerating  bool
 	llmResult      string
-	llmErr         string
 	llmContext     textarea.Model
 	llmStartDate   textinput.Model
 	llmFieldCursor int // 0=startDate, 1=days, 2=context
 	planDays       int
 
-	fieldCursor        int
-	llmDescGenerating  bool
-	submitIdx    int
-	submitErr    string
-	reviewCursor int
-	spinner      spinner.Model
+	fieldCursor       int
+	llmDescGenerating bool
+	submitIdx         int
+	reviewCursor      int
+	spinner           spinner.Model
 
 	// tagging step
 	entityOptions    []asana.EnumOption
@@ -73,7 +70,7 @@ type PlannerModel struct {
 	taggingLoading   bool
 }
 
-func NewPlannerModel(cfg *config.Config, asanaCli *asana.Client, llmCli *llm.Client) PlannerModel {
+func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.LLMClient) PlannerModel {
 	ti := textinput.New()
 	ti.Placeholder = "Task title"
 	ti.CharLimit = 200

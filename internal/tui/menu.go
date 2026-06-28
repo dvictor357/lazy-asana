@@ -16,17 +16,19 @@ type MenuModel struct {
 	items  []menuItem
 	cursor int
 	bound  bool
+	hasLLM bool
 }
 
-func NewMenu(bound bool) MenuModel {
+func NewMenu(bound, hasLLM bool) MenuModel {
 	items := []menuItem{
 		{title: "Bind Account", desc: "Configure Asana & OpenRouter API keys"},
 		{title: "Show Week Hours", desc: "View actual hours for a given week"},
 		{title: "Plan Day/Week", desc: "Plan and create tasks with LLM assistance"},
 		{title: "Move Tasks", desc: "Move tasks between projects by date range"},
+		{title: "Chat with AI", desc: "Chat with the AI assistant"},
 		{title: "Insights", desc: "Interactive weekly/monthly hours breakdown with charts"},
 	}
-	return MenuModel{items: items, bound: bound}
+	return MenuModel{items: items, bound: bound, hasLLM: hasLLM}
 }
 
 func (m MenuModel) Init() tea.Cmd {
@@ -37,11 +39,11 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "up", "k":
+		case "up", "k", "ctrl+p":
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "down", "j":
+		case "down", "j", "ctrl+n":
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
@@ -65,6 +67,16 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMigrate} }
 			case 4:
+				if !m.bound {
+					return m, func() tea.Msg { return ErrorMsg{Message: "please bind your account first"} }
+				}
+				if !m.hasLLM {
+					return m, func() tea.Msg {
+						return ErrorMsg{Message: "no LLM API key configured — please bind your OpenRouter or DeepSeek key"}
+					}
+				}
+				return m, func() tea.Msg { return ScreenMsg{Screen: screenChat} }
+			case 5:
 				if !m.bound {
 					return m, func() tea.Msg { return ErrorMsg{Message: "please bind your account first"} }
 				}

@@ -22,8 +22,8 @@ const (
 
 type App struct {
 	cfg      *config.Config
-	asana    *asana.Client
-	llm      *llm.Client
+	asana    asana.AsanaClient
+	llm      llm.LLMClient
 	screen   screen
 	menu     MenuModel
 	bind     BindModel
@@ -38,7 +38,7 @@ type App struct {
 }
 
 func NewApp(cfg *config.Config) *App {
-	var ac *asana.Client
+	var ac asana.AsanaClient
 	if cfg.AsanaToken != "" {
 		ac = asana.NewClient(cfg.AsanaToken)
 	}
@@ -50,7 +50,7 @@ func NewApp(cfg *config.Config) *App {
 		asana:  ac,
 		llm:    lc,
 		screen: screenMenu,
-		menu:   NewMenu(cfg.IsBound()),
+		menu:   NewMenu(cfg.IsBound(), lc != nil),
 	}
 
 	if !cfg.IsBound() {
@@ -95,12 +95,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.llm != nil {
 				a.chat = NewChatModel(a.llm)
 			}
+		case screenChat:
+			if a.llm != nil {
+				a.chat = NewChatModel(a.llm)
+			}
 		case screenMenu:
-			a.menu = NewMenu(a.cfg.IsBound())
+			a.menu = NewMenu(a.cfg.IsBound(), a.llm != nil)
 		case screenMigrate:
 			a.migrate = NewMigrateModel(a.cfg, a.asana)
 		case screenInsights:
 			a.insights = NewInsightsModel(a.cfg, a.asana)
+			return a, tea.Batch(a.insights.Init())
 		}
 		return a, nil
 	case ErrorMsg:
@@ -115,7 +120,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.insights = NewInsightsModel(a.cfg, a.asana)
 		a.chat = NewChatModel(a.llm)
 		a.screen = screenMenu
-		a.menu = NewMenu(true)
+		a.menu = NewMenu(true, a.llm != nil)
 		return a, nil
 	}
 
@@ -190,7 +195,7 @@ type BindCompleteMsg struct {
 	Config *config.Config
 }
 
-func newLLMClient(cfg *config.Config) *llm.Client {
+func newLLMClient(cfg *config.Config) llm.LLMClient {
 	switch cfg.LLMProvider {
 	case "deepseek":
 		if cfg.DeepSeekKey != "" {

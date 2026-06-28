@@ -14,31 +14,48 @@ import (
 
 const baseURL = "https://app.asana.com/api/1.0"
 
+// RetryMax is the maximum number of retries for transient errors.
+// 0 means use the default (3). Set to a negative value to disable retries.
+const DefaultRetryMax = 3
+
 type Client struct {
 	token      string
 	httpClient *http.Client
+	RetryMax   int
 }
 
 func NewClient(token string) *Client {
 	return &Client{
 		token:      token,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		RetryMax:   DefaultRetryMax,
 	}
 }
 
+// retryDelay returns the backoff duration for attempt n (0-indexed).
+func retryDelay(attempt int) time.Duration {
+	return time.Duration(1<<uint(attempt)) * time.Second // 1s, 2s, 4s
+}
+
 func (c *Client) doRequest(method, path string, body interface{}) (json.RawMessage, error) {
+	data, _, err := c.doRequestRet(method, path, body)
+	return data, err
+}
+
+// doRequestRet returns (data, statusCode, error).
+func (c *Client) doRequestRet(method, path string, body interface{}) (json.RawMessage, int, error) {
 	var reqBody io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
+		jsonData, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		reqBody = bytes.NewReader(data)
+		reqBody = bytes.NewReader(jsonData)
 	}
 
 	req, err := http.NewRequest(method, baseURL+path, reqBody)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
@@ -46,28 +63,60 @@ func (c *Client) doRequest(method, path string, body interface{}) (json.RawMessa
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
 
 	if resp.StatusCode >= 400 {
 		var errResp ErrorResponse
 		if json.Unmarshal(data, &errResp) == nil && len(errResp.Errors) > 0 {
-			return nil, fmt.Errorf("asana: %s", errResp.Error())
+			return nil, resp.StatusCode, fmt.Errorf("asana: %s", errResp.Error())
 		}
-		return nil, fmt.Errorf("asana: HTTP %d: %s", resp.StatusCode, string(data))
+		return nil, resp.StatusCode, fmt.Errorf("asana: HTTP %d: %s", resp.StatusCode, string(data))
 	}
 
 	var wrapper asanaResponse
 	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
-	return wrapper.Data, nil
+	return wrapper.Data, resp.StatusCode, nil
+}
+
+// doRequestWithRetry retries on 429 (rate limit) and 5xx errors with
+// exponential backoff. Uses c.RetryMax (0 means DefaultRetryMax).
+func (c *Client) doRequestWithRetry(method, path string, body interface{}) (json.RawMessage, error) {
+	maxRetries := c.RetryMax
+	if maxRetries == 0 {
+		maxRetries = DefaultRetryMax
+	}
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		data, status, err := c.doRequestRet(method, path, body)
+		if err == nil {
+			return data, nil
+		}
+
+		// Only retry on transient errors (429 rate limit, 5xx server errors).
+		if status != 429 && status < 500 {
+			return nil, err
+		}
+
+		// Last attempt — don't sleep before giving up.
+		if attempt == maxRetries {
+			return nil, fmt.Errorf("asana: retry %d/%d: %w", attempt+1, maxRetries, err)
+		}
+
+		time.Sleep(retryDelay(attempt))
+	}
+	return nil, fmt.Errorf("asana: unreachable")
 }
 
 func (c *Client) doPaginatedRequest(path string, params url.Values) (json.RawMessage, error) {
@@ -240,7 +289,7 @@ func (c *Client) CreateTask(input map[string]interface{}) (*Task, error) {
 	body := map[string]interface{}{
 		"data": input,
 	}
-	data, err := c.doRequest("POST", "/tasks", body)
+	data, err := c.doRequestWithRetry("POST", "/tasks", body)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +302,7 @@ func (c *Client) CreateSubtask(parentGID string, input map[string]interface{}) (
 		"data": input,
 	}
 	path := fmt.Sprintf("/tasks/%s/subtasks", parentGID)
-	data, err := c.doRequest("POST", path, body)
+	data, err := c.doRequestWithRetry("POST", path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +359,7 @@ func (c *Client) AddTaskToProject(taskGID, projectGID, sectionGID string) error 
 		data["section"] = sectionGID
 	}
 	body := map[string]interface{}{"data": data}
-	_, err := c.doRequest("POST", fmt.Sprintf("/tasks/%s/addProject", taskGID), body)
+	_, err := c.doRequestWithRetry("POST", fmt.Sprintf("/tasks/%s/addProject", taskGID), body)
 	return err
 }
 
@@ -318,7 +367,7 @@ func (c *Client) RemoveTaskFromProject(taskGID, projectGID string) error {
 	body := map[string]interface{}{
 		"data": map[string]interface{}{"project": projectGID},
 	}
-	_, err := c.doRequest("POST", fmt.Sprintf("/tasks/%s/removeProject", taskGID), body)
+	_, err := c.doRequestWithRetry("POST", fmt.Sprintf("/tasks/%s/removeProject", taskGID), body)
 	return err
 }
 

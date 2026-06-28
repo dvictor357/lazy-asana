@@ -14,7 +14,9 @@ type submitResult struct {
 
 func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 	if m.asanaCli == nil {
-		return func() tea.Msg { return submitResult{idx: idx, err: "asana client not configured — please bind your account first"} }
+		return func() tea.Msg {
+			return submitResult{idx: idx, err: "asana client not configured — please bind your account first"}
+		}
 	}
 	if idx >= len(m.tasks) {
 		return func() tea.Msg { return submitResult{idx: idx, done: true} }
@@ -37,7 +39,7 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 			"notes":     task.Description,
 			"projects":  []string{projGID},
 			"workspace": wsGID,
-			"completed": true,
+			"completed": false,
 		}
 		if userGID != "" {
 			input["assignee"] = userGID

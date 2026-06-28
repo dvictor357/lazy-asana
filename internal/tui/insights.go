@@ -41,33 +41,34 @@ type insightWeekSummary struct {
 }
 
 type InsightsModel struct {
-	cfg     *config.Config
-	client  *asana.Client
-	mode    insightMode
-	refDate time.Time
-	loading bool
-	tasks   []asana.Task
-	cursor  int
-	total   float64
-	err     string
-	spinner spinner.Model
-	width   int
+	cfg       *config.Config
+	client    asana.AsanaClient
+	mode      insightMode
+	refDate   time.Time
+	loading   bool
+	firstLoad bool
+	tasks     []asana.Task
+	cursor    int
+	total     float64
+	spinner   spinner.Model
+	width     int
 }
 
-func NewInsightsModel(cfg *config.Config, client *asana.Client) InsightsModel {
+func NewInsightsModel(cfg *config.Config, client asana.AsanaClient) InsightsModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	return InsightsModel{
-		cfg:     cfg,
-		client:  client,
-		mode:    insightModeWeek,
-		refDate: time.Now(),
-		spinner: sp,
+		cfg:       cfg,
+		client:    client,
+		mode:      insightModeWeek,
+		refDate:   time.Now(),
+		spinner:   sp,
+		loading:   true,
+		firstLoad: true,
 	}
 }
 
 func (m InsightsModel) Init() tea.Cmd {
-	m.loading = true
 	return tea.Batch(m.fetchCmd(), m.spinner.Tick)
 }
 
@@ -85,9 +86,9 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case insightsResult:
 		m.loading = false
+		m.firstLoad = false
 		if msg.err != nil {
-			m.err = msg.err.Error()
-			return m, nil
+			return m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
 		}
 		m.tasks = msg.tasks
 		m.total = 0
@@ -95,8 +96,7 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.total += asana.ParseActualHours(t.CustomFields, m.cfg.ActualHoursFieldGID)
 		}
 		m.cursor = 0
-		m.err = ""
-		return m, nil
+		return m, func() tea.Msg { return ErrorMsg{Message: ""} }
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -108,13 +108,13 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right":
 			return m.navigate(1)
 
-		case "up", "k":
+		case "up", "k", "ctrl+p":
 			if m.cursor > 0 {
 				m.cursor--
 			}
 			return m, nil
 
-		case "down", "j":
+		case "down", "j", "ctrl+n":
 			max := len(m.tasks) - 1
 			if m.mode == insightModeMonth {
 				max = len(m.weekSummaries()) - 1
@@ -129,7 +129,7 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = insightModeWeek
 				m.cursor = 0
 				m.loading = true
-				return m, tea.Batch(m.fetchCmd(), m.spinner.Tick)
+				return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 			}
 
 		case "m":
@@ -137,7 +137,7 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = insightModeMonth
 				m.cursor = 0
 				m.loading = true
-				return m, tea.Batch(m.fetchCmd(), m.spinner.Tick)
+				return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 			}
 
 		case "enter":
@@ -151,13 +151,13 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = insightModeWeek
 					m.cursor = 0
 					m.loading = true
-					return m, tea.Batch(m.fetchCmd(), m.spinner.Tick)
+					return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 				}
 			}
 
 		case "r":
 			m.loading = true
-			return m, tea.Batch(m.fetchCmd(), m.spinner.Tick)
+			return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 		}
 	}
 
@@ -172,7 +172,7 @@ func (m InsightsModel) navigate(dir int) (tea.Model, tea.Cmd) {
 	}
 	m.loading = true
 	m.cursor = 0
-	return m, tea.Batch(m.fetchCmd(), m.spinner.Tick)
+	return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 }
 
 func (m InsightsModel) fetchCmd() tea.Cmd {
@@ -316,13 +316,11 @@ func (m InsightsModel) View() string {
 	s += "\n\n"
 
 	if m.loading {
-		s += m.spinner.View() + " Loading...\n"
-		return lipgloss.NewStyle().Padding(2, 4).Render(s)
-	}
-
-	if m.err != "" {
-		s += ErrorStyle.Render(m.err) + "\n\n"
-		s += DimStyle.Render("r refresh • esc back")
+		s += m.spinner.View() + " Loading insights...\n"
+		if m.firstLoad {
+			s += DimStyle.Render("Break down Asana tasks by day and week.\n")
+		}
+		s += DimStyle.Render("Use ← → to navigate, w/m to switch views")
 		return lipgloss.NewStyle().Padding(2, 4).Render(s)
 	}
 

@@ -59,11 +59,11 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch k.String() {
-	case "up", "k":
+	case "up", "k", "ctrl+p":
 		if m.menuIdx > 0 {
 			m.menuIdx--
 		}
-	case "down", "j":
+	case "down", "j", "ctrl+n":
 		if m.menuIdx < 3 {
 			m.menuIdx++
 		}
@@ -80,8 +80,7 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hoursInput.Blur()
 			m.dateInput.Blur()
 			m.titleInput.Focus()
-			m.validationErr = ""
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
 		case 1:
 			if len(m.tasks) == 0 {
 				return *m, nil
@@ -97,8 +96,7 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hoursInput.Blur()
 			m.dateInput.Blur()
 			m.titleInput.Focus()
-			m.validationErr = ""
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
 		case 2:
 			if m.llmCli == nil {
 				return *m, func() tea.Msg { return ErrorMsg{Message: "no LLM key configured"} }
@@ -108,9 +106,8 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.llmContext.Blur()
 			m.llmStartDate.SetValue("")
 			m.llmStartDate.Focus()
-			m.llmErr = ""
 			m.llmFieldCursor = 0
-			return *m, nil
+			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
 		case 3:
 			if len(m.tasks) == 0 {
 				return *m, nil
@@ -118,9 +115,13 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = plannerStepReview
 			return *m, nil
 		}
-	case "tab":
+	case "tab", "ctrl+f":
 		if len(m.tasks) > 0 {
 			m.cursor = (m.cursor + 1) % len(m.tasks)
+		}
+	case "shift+tab", "ctrl+b":
+		if len(m.tasks) > 0 {
+			m.cursor = (m.cursor - 1 + len(m.tasks)) % len(m.tasks)
 		}
 	}
 	return *m, nil
@@ -134,7 +135,7 @@ func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if t.err == "" && t.desc != "" {
 				m.descInput.SetValue(t.desc)
 			} else if t.err != "" {
-				m.validationErr = "LLM error: " + t.err
+				return *m, func() tea.Msg { return ErrorMsg{Message: "LLM error: " + t.err} }
 			}
 			return *m, nil
 		}
@@ -142,10 +143,10 @@ func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch k.String() {
-	case "tab":
+	case "tab", "ctrl+f":
 		m.cycleField(1)
 		return *m, nil
-	case "shift+tab":
+	case "shift+tab", "ctrl+b":
 		m.cycleField(-1)
 		return *m, nil
 	case "ctrl+g":
@@ -174,7 +175,7 @@ func (m *PlannerModel) cycleField(dir int) {
 	m.descInput.Blur()
 	m.hoursInput.Blur()
 	m.dateInput.Blur()
-	m.fieldCursor = ((m.fieldCursor + dir) % 4 + 4) % 4
+	m.fieldCursor = ((m.fieldCursor+dir)%4 + 4) % 4
 	switch m.fieldCursor {
 	case 0:
 		m.titleInput.Focus()
@@ -217,8 +218,6 @@ func (m *PlannerModel) handleGenerateDescription() tea.Cmd {
 }
 
 func (m *PlannerModel) handleSaveTask() tea.Cmd {
-	m.validationErr = ""
-
 	title := m.titleInput.Value()
 	if title == "" {
 		return nil
@@ -228,15 +227,13 @@ func (m *PlannerModel) handleSaveTask() tea.Cmd {
 	hoursStr := m.hoursInput.Value()
 	if hoursStr != "" {
 		if _, err := fmt.Sscanf(hoursStr, "%f", &hours); err != nil || hours == 0 {
-			m.validationErr = "invalid hours: enter a number (e.g. 1.5)"
-			return nil
+			return func() tea.Msg { return ErrorMsg{Message: "invalid hours: enter a number (e.g. 1.5)"} }
 		}
 	}
 
 	if dateStr := m.dateInput.Value(); dateStr != "" {
 		if err := asana.ValidateDate(dateStr); err != nil {
-			m.validationErr = "invalid date: use YYYY-MM-DD format"
-			return nil
+			return func() tea.Msg { return ErrorMsg{Message: "invalid date: use YYYY-MM-DD format"} }
 		}
 	}
 
@@ -264,11 +261,11 @@ func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch k.String() {
-	case "up", "k":
+	case "up", "k", "ctrl+p":
 		if m.reviewCursor > 0 {
 			m.reviewCursor--
 		}
-	case "down", "j":
+	case "down", "j", "ctrl+n":
 		if m.reviewCursor < len(m.tasks)-1 {
 			m.reviewCursor++
 		}
@@ -303,9 +300,8 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case submitResult:
 			m.submitIdx = t.idx
 			if t.err != "" {
-				m.submitErr = t.err
 				m.step = plannerStepMenu
-				return *m, nil
+				return *m, func() tea.Msg { return ErrorMsg{Message: t.err} }
 			}
 			if t.done {
 				m.step = plannerStepDone
@@ -319,9 +315,8 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "y", "enter":
 		m.submitIdx = 0
-		m.submitErr = ""
 		m.step = plannerStepSubmitting
-		return *m, tea.Batch(m.submitNext(0), m.spinner.Tick)
+		return *m, tea.Batch(m.submitNext(0), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 	case "n", "esc":
 		m.step = plannerStepReview
 	}

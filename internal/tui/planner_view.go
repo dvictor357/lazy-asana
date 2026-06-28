@@ -148,10 +148,6 @@ func (m PlannerModel) viewAddTask(header string) string {
 	hint += " • esc cancel"
 	b.WriteString(DimStyle.Render(hint))
 
-	if m.validationErr != "" {
-		b.WriteString("\n" + ErrorStyle.Render(m.validationErr))
-	}
-
 	return b.String()
 }
 
@@ -231,10 +227,6 @@ func (m PlannerModel) viewReview() string {
 	b.WriteString(HighlightStyle.Render(fmt.Sprintf("Total: %.1f hours across %d tasks", totalHours, total)))
 	b.WriteString("\n\n")
 	b.WriteString(DimStyle.Render("↑/k↓/j navigate • d delete task • enter submit • esc go back"))
-
-	if m.submitErr != "" {
-		b.WriteString("\n" + ErrorStyle.Render(m.submitErr))
-	}
 
 	return b.String()
 }
@@ -351,11 +343,6 @@ func (m PlannerModel) viewLLMPlan() string {
 	b.WriteString("\n")
 	b.WriteString(m.llmContext.View())
 	b.WriteString("\n\n")
-
-	if m.llmErr != "" {
-		b.WriteString(ErrorStyle.Render(m.llmErr))
-		b.WriteString("\n\n")
-	}
 
 	switch m.llmFieldCursor {
 	case 0:
