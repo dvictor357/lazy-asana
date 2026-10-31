@@ -32,3 +32,6 @@ Thumbs.db
 # Config with secrets
 .config/
 .claude/
+
+# GoReleaser output
+dist/

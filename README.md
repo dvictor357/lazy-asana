@@ -1,118 +1,173 @@
 # lazy-asana
 
-`lazy-asana` is a terminal UI for planning, reviewing, and moving Asana tasks with optional OpenRouter-assisted week planning.
+`lazy-asana` is a terminal UI for logging your work in Asana: turn your commits
+into tasks, tag them, drop them in the right month section, and check your
+hours per day and week.
 
-It is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), talks directly to the Asana REST API, and stores local state in a small config file under `~/.config/lazy-asana/`.
+It is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea),
+talks directly to the Asana REST API, and keeps its settings in
+`~/.config/lazy-asana/config.json`.
 
 ## What The App Does
 
-- Set up your Asana account, LLM keys and git sources in Settings.
-- See hours by day and week in Insights, and move tasks to another project from there.
-- Compose, tag and submit tasks and subtasks into Asana from one table view.
-- Import your commits (GitLab, GitHub, local clones) into Task Composer as draft tasks, one per day per repo.
-- Generate structured week plans with OpenRouter and submit them to Asana.
+- **Insights**: hours per day and week against 8h/40h, for the default
+  project or all your tasks; pick tasks and move them to another project.
+- **Task Composer**: one table to add, edit, tag and submit tasks and
+  subtasks, with hours per day and a detail panel.
+  - Each task lands in the default project's section for its due-date month
+    (e.g. `October 2026`).
+  - Per-task Company/Entity and Product/Project tags, with search.
+  - Mark tasks completed before submitting.
+  - A failed submit can be retried without creating duplicates.
+- **Import from git**: read your commits from GitLab (gitlab.com or
+  self-hosted), GitHub and local clones, and add them as draft tasks, one
+  per day per repo, with estimated hours.
+- **LLM Auto-Plan** (optional): describe your week, get a task list back
+  from OpenRouter or DeepSeek.
+- **Settings**: Asana account, LLM provider and keys, git sources.
 
-## Quickstart
+## Install
 
-### Prerequisites
+### From A Release
 
-- Go `1.26.2` or newer
-- An Asana Personal Access Token
-- An OpenRouter API key if you want LLM-assisted planning
+Download the archive for your OS from
+[Releases](https://github.com/dvictor357/lazy-asana/releases)
+(macOS and Linux on amd64/arm64, Windows on amd64), check it against
+`checksums.txt`, unpack it and put `lazy-asana` on your `PATH`.
 
-### Build And Run
+On macOS, a downloaded binary is quarantined the first time; clear it with:
 
 ```bash
+xattr -d com.apple.quarantine ./lazy-asana
+```
+
+### With Go
+
+Requires Go `1.26.2` or newer.
+
+```bash
+go install github.com/dvictor357/lazy-asana@latest
+lazy-asana --version
+```
+
+### From Source
+
+```bash
+git clone https://github.com/dvictor357/lazy-asana.git
+cd lazy-asana
 go build -o lazy-asana .
 ./lazy-asana
 ```
 
-You can also run it without a build step:
+## First Run
 
-```bash
-go run .
-```
-
-### First Run
+You need an Asana Personal Access Token
+([create one](https://app.asana.com/0/my-apps)).
 
 On first launch the app opens Settings → Asana:
 
-1. Enter your Asana Personal Access Token.
+1. Enter your Asana token.
 2. Select a workspace.
-3. Select the default project you want the app to work against.
+3. Select the default project (e.g. your team planner). The app detects its
+   hours field and the Company/Entity and Product/Project fields.
 
-You land back in Settings, where you can add LLM keys and git sources. The app writes config to `~/.config/lazy-asana/config.json`.
+You land back in Settings, where you can add:
 
-## Core Workflows
+- **LLM**: an OpenRouter or DeepSeek key, for LLM Auto-Plan and `ctrl+g`
+  description drafts.
+- **Git sources**: where your commits come from.
 
-### Settings
+| Source | Needs | Reads |
+| --- | --- | --- |
+| GitLab.com | token with `read_api` | all branches |
+| GitLab self-hosted | instance URL + token with `read_api` | all branches |
+| GitHub | [classic token](https://github.com/settings/tokens/new) with `repo`, or a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with Contents: read-only; API URL only for GitHub Enterprise | default branches only |
+| Local folder | a folder of clones, scan depth (default 4) | all branches, including unpushed work |
 
-- Asana: validates the token against `/users/me`.
-- Lists available workspaces.
-- Lets you search and pick a default project.
-- Detects a numeric "actual hours" field for that project when possible.
-- LLM: provider (OpenRouter or DeepSeek) and API keys.
-- Git sources: GitLab.com, self-hosted GitLab, GitHub and local folders that Task Composer imports your commits from.
+Tokens are stored in the config file (mode `0600`) and shown masked.
 
-### Insights
+## Daily Use
 
-- Week view: hours per day against 8h and the week's tasks; month view: hours per week.
-- `p` switches scope between the default project and all your tasks in the workspace.
-- Pick tasks in the week view and press `M` to move them to another project and section, optionally removing them from a source project.
+1. Open **Task Composer**, press `i`, keep the default range (Monday to
+   today) and press `enter`.
+2. Tick the day/repo entries to log and press `enter`; they become draft
+   tasks with the commit list as description.
+3. Adjust hours (`e`), set tags (`t`), mark finished work completed (`c`).
+4. Press `enter`, check the target month sections, confirm.
+5. Open **Insights** to see the week's hours add up.
 
-### Task Composer
+Hours from git import are estimates from commit size (at most 8h a day).
+Adjust them to the time you actually spent.
 
-- One table view to add, edit, tag and delete tasks and subtasks before submission, with hours per day and a detail panel.
-- Per-task Company/Entity and Product/Project tags, with a batch default for untagged tasks.
-- Submits into the default project, places each task in its month section, and never duplicates a task on resubmit.
-- Can ask the LLM for a structured week plan and parse the returned JSON into tasks.
+Full keybindings: [docs/workflows.md](docs/workflows.md).
 
 ## Documentation
 
 - [Setup](docs/setup.md)
-- [Workflows](docs/workflows.md)
-- [Config Reference](docs/config.md)
-- [Architecture Notes](docs/architecture.md)
+- [Workflows and keys](docs/workflows.md)
+- [Config reference](docs/config.md)
+- [Architecture notes](docs/architecture.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Configuration
 
-Config lives at `~/.config/lazy-asana/config.json`.
-
-Example:
+`~/.config/lazy-asana/config.json`, written by Settings. Example:
 
 ```json
 {
-  "asana_token": "pat/...",
+  "asana_token": "2/...",
+  "llm_provider": "openrouter",
   "openrouter_key": "sk-or-...",
   "default_workspace_gid": "...",
   "default_project_gid": "...",
   "actual_hours_field_gid": "...",
-  "user_gid": "..."
+  "user_gid": "...",
+  "git_sources": [
+    { "kind": "gitlab", "name": "GitLab.com", "base_url": "https://gitlab.com", "token": "glpat-..." },
+    { "kind": "github", "token": "ghp_..." },
+    { "kind": "local", "path": "~/Projects/company", "depth": 4 }
+  ]
 }
 ```
 
-See [docs/config.md](docs/config.md) for field-by-field details.
+Field-by-field details: [docs/config.md](docs/config.md).
 
 ## Known Limitations
 
-- The hours and move flows rely on Asana task search by due date, so tasks without a due date are excluded from those screens.
-- Hours totals depend on the app finding a numeric custom field that looks like an "actual hours" field in the selected project. If no matching field is found, totals display as `0` and planner submissions skip that custom field.
-- The manual planner form needs more polish than the LLM-generated planning path. The richer multi-field flow is not as complete as the week-plan generator yet.
-- The repository currently has no automated tests beyond a compile-level `go test ./...`.
+- Insights and Move Tasks search tasks by due date; tasks without one do not
+  show up there. Asana search returns at most 100 tasks per query.
+- Hours totals need a numeric "actual hours" custom field in the default
+  project; without it they show `0` and submissions skip the field.
+- A task carries one value per single-select tag field, so work spanning two
+  products needs two tasks.
+- Tasks go into the default project only.
+- GitHub import misses commits on unmerged branches (search only indexes
+  default branches); add the local clone as a source to catch them.
 
 ## Development
 
-Useful commands:
-
 ```bash
 go build ./...
-go test ./...
+go vet ./...
+go test -race ./...
 go run .
 ```
 
+CI runs build, vet and tests on every push and pull request to `main`.
 Contribution guidance lives in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Releasing
+
+Push a `v*` tag. The Release workflow runs vet and tests, then GoReleaser
+builds the binaries, writes `checksums.txt` and a changelog grouped by
+`feat:`/`fix:` commits, and publishes a GitHub release. Tags with a suffix
+(`v0.2.0-rc.1`) become pre-releases.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
