@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,8 +109,7 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 	entityFieldType := m.cfg.EntityFieldType
 	productFieldGID := m.cfg.ProductFieldGID
 	productFieldType := m.cfg.ProductFieldType
-	selectedEntities := m.selectedEntities
-	selectedProducts := m.selectedProducts
+	entities, products := m.tagsFor(task)
 	asanaCli := m.asanaCli
 
 	return func() tea.Msg {
@@ -136,8 +136,8 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 			if hoursFieldGID != "" && task.Hours > 0 {
 				customFields[hoursFieldGID] = task.Hours
 			}
-			applyEnumField(customFields, entityFieldGID, entityFieldType, selectedEntities)
-			applyEnumField(customFields, productFieldGID, productFieldType, selectedProducts)
+			applyEnumField(customFields, entityFieldGID, entityFieldType, entities)
+			applyEnumField(customFields, productFieldGID, productFieldType, products)
 			if len(customFields) > 0 {
 				input["custom_fields"] = customFields
 			}
@@ -226,6 +226,7 @@ func applyEnumField(customFields map[string]interface{}, fieldGID, fieldType str
 	if len(gids) == 0 {
 		return
 	}
+	sort.Strings(gids) // map order is random; keep the payload deterministic
 	if fieldType == "multi_enum" {
 		customFields[fieldGID] = gids
 	} else {

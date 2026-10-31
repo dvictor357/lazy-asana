@@ -115,6 +115,13 @@ Submission behavior:
 - moves each task with a due date into the default project's section for that month (`October`, `October 2026`, `Oct` or `Oct 2026`, case-insensitive; a name with the matching year wins)
 - tasks without a due date stay in the project's default section
 
+Tags (Company/Entity and Product/Project):
+
+- in Review, `t` sets tags for the highlighted task and `u` returns it to the batch default
+- on submit, the default-tag picker appears only if some task has no tags of its own
+- single-select (`enum`) fields keep one option; picking another replaces it. `multi_enum` fields accept several
+- Review and Confirm show each task's tags; one task can carry only one value per `enum` field, so work spanning two products needs two tasks
+
 Month sections:
 
 - the confirm screen lists each task's target section before anything is sent

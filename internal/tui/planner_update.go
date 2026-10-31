@@ -22,6 +22,9 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Leaving mid-submit would silently stop the chain halfway.
 				return m, nil
 			}
+			if m.step == plannerStepTagging {
+				break // the tag picker returns to Review itself
+			}
 			if m.step == plannerStepMenu {
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 			}
@@ -300,17 +303,25 @@ func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sections = nil
 			m.sectionsErr = ""
 			m.sectionsLoaded = false
-			if m.cfg.EntityFieldGID != "" || m.cfg.ProductFieldGID != "" {
-				m.step = plannerStepTagging
-				m.taggingLoading = true
-				m.taggingSection = 0
-				m.taggingCursor = 0
-				m.selectedEntities = map[string]bool{}
-				m.selectedProducts = map[string]bool{}
-				return *m, tea.Batch(m.fetchTagOptions(), m.fetchSections(), m.spinner.Tick)
+			// Ask for the batch default only when some task has no tags of its own.
+			if m.hasTagFields() && m.needsBatchTags() {
+				return *m, tea.Batch(m.openTagging(-1), m.fetchSections(), m.spinner.Tick)
 			}
 			m.step = plannerStepConfirm
 			return *m, tea.Batch(m.fetchSections(), m.spinner.Tick)
+		}
+	case "t":
+		if len(m.tasks) == 0 || !m.hasTagFields() {
+			return *m, nil
+		}
+		if m.tasks[m.reviewCursor].submitted() {
+			return *m, func() tea.Msg { return ErrorMsg{Message: "task is already in Asana; change its tags there"} }
+		}
+		return *m, tea.Batch(m.openTagging(m.reviewCursor), m.spinner.Tick)
+	case "u":
+		if len(m.tasks) > 0 && !m.tasks[m.reviewCursor].submitted() {
+			t := &m.tasks[m.reviewCursor]
+			t.HasTags, t.Entities, t.Products = false, nil, nil
 		}
 	}
 	return *m, nil

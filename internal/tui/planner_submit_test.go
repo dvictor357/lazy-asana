@@ -20,6 +20,7 @@ type fakeAsana struct {
 	failTask, failSub, failPlace    int
 	created                         []string // task names created
 	placed                          map[string]string
+	fields                          map[string]map[string]interface{} // custom_fields per created task
 }
 
 func (f *fakeAsana) CreateTask(in map[string]interface{}) (*asana.Task, error) {
@@ -29,7 +30,20 @@ func (f *fakeAsana) CreateTask(in map[string]interface{}) (*asana.Task, error) {
 	}
 	name := in["name"].(string)
 	f.created = append(f.created, name)
+	if cf, ok := in["custom_fields"].(map[string]interface{}); ok {
+		if f.fields == nil {
+			f.fields = map[string]map[string]interface{}{}
+		}
+		f.fields[name] = cf
+	}
 	return &asana.Task{GID: "gid-" + name}, nil
+}
+
+func (f *fakeAsana) GetCustomFieldSettings(string) ([]asana.CustomFieldSetting, error) {
+	return []asana.CustomFieldSetting{
+		{CustomField: asana.CustomField{GID: "ent", EnumOptions: []asana.EnumOption{{GID: "e-elfo", Name: "elfo"}, {GID: "e-x", Name: "X"}}}},
+		{CustomField: asana.CustomField{GID: "prod", EnumOptions: []asana.EnumOption{{GID: "p-a2p", Name: "elfo A2P"}, {GID: "p-y", Name: "Y"}}}},
+	}, nil
 }
 
 func (f *fakeAsana) CreateSubtask(parent string, in map[string]interface{}) (*asana.Task, error) {
@@ -104,7 +118,7 @@ func runAll(cmd tea.Cmd) []tea.Msg {
 			out = append(out, runAll(c)...)
 		}
 		return out
-	case submitResult, sectionsResult:
+	case submitResult, sectionsResult, tagOptionsResult:
 		return []tea.Msg{msg}
 	}
 	return nil
@@ -299,4 +313,123 @@ func TestMonthSection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newTaggedPlanner(f *fakeAsana, prodType string, tasks ...PlanTask) PlannerModel {
+	m := NewPlannerModel(&config.Config{
+		DefaultProjectGID: "proj", DefaultWorkspaceGID: "ws",
+		EntityFieldGID: "ent", EntityFieldType: "enum",
+		ProductFieldGID: "prod", ProductFieldType: prodType,
+	}, f, nil)
+	m.tasks = tasks
+	m.step = plannerStepReview
+	return m
+}
+
+// pick moves to option i of the current field and selects it.
+func pick(t *testing.T, m PlannerModel, i int) PlannerModel {
+	t.Helper()
+	m.taggingCursor = i
+	return step(t, m, keyMsg(" "))
+}
+
+func TestPerTaskTagsAndBatchDefault(t *testing.T) {
+	f := &fakeAsana{sections: monthSections}
+	m := newTaggedPlanner(f, "enum",
+		PlanTask{Title: "a", DueDate: "2026-10-19"},
+		PlanTask{Title: "b", DueDate: "2026-10-19"},
+	)
+	// task b gets its own tags: X / Y
+	m.reviewCursor = 1
+	m = step(t, m, keyMsg("t"))
+	if m.step != plannerStepTagging || m.tagTarget != 1 {
+		t.Fatalf("t: step=%v target=%d, want tagging task 1", m.step, m.tagTarget)
+	}
+	m = pick(t, m, 1)             // entity X
+	m = step(t, m, keyMsg("tab")) // product field
+	m = pick(t, m, 1)             // product Y
+	m = step(t, m, keyMsg("enter"))
+	if m.step != plannerStepReview || !m.tasks[1].HasTags {
+		t.Fatalf("after save: step=%v hasTags=%v, want back on review with tags", m.step, m.tasks[1].HasTags)
+	}
+
+	// submit: batch default for task a is elfo / elfo A2P
+	m = step(t, m, keyMsg("enter"))
+	if m.step != plannerStepTagging || m.tagTarget != -1 {
+		t.Fatalf("submit: step=%v target=%d, want batch default picker", m.step, m.tagTarget)
+	}
+	m = pick(t, m, 0)
+	m = step(t, m, keyMsg("tab"))
+	m = pick(t, m, 0)
+	m = step(t, m, keyMsg("enter"))
+	m = step(t, m, keyMsg("enter"))
+	if m.step != plannerStepDone {
+		t.Fatalf("step=%v, want done", m.step)
+	}
+	want := map[string]string{"a": "e-elfo p-a2p", "b": "e-x p-y"}
+	for task, w := range want {
+		cf := f.fields[task]
+		if got := fmt.Sprint(cf["ent"], " ", cf["prod"]); got != w {
+			t.Errorf("task %s tags = %s, want %s", task, got, w)
+		}
+	}
+}
+
+func TestBatchPickerSkippedWhenAllTasksTagged(t *testing.T) {
+	f := &fakeAsana{sections: monthSections}
+	m := newTaggedPlanner(f, "enum", PlanTask{Title: "a", DueDate: "2026-10-19"})
+	m = step(t, m, keyMsg("t"))
+	m = pick(t, m, 0)
+	m = step(t, m, keyMsg("enter"))
+	m = step(t, m, keyMsg("enter"))
+	if m.step != plannerStepConfirm {
+		t.Fatalf("step=%v, want confirm (no batch picker needed)", m.step)
+	}
+}
+
+func TestEnumFieldKeepsOneOption(t *testing.T) {
+	m := newTaggedPlanner(&fakeAsana{}, "enum", PlanTask{Title: "a"})
+	m = step(t, m, keyMsg("t"))
+	m = pick(t, m, 0)
+	m = pick(t, m, 1)
+	if len(m.selectedEntities) != 1 || !m.selectedEntities["e-x"] {
+		t.Fatalf("enum selection = %v, want only e-x", m.selectedEntities)
+	}
+	m = pick(t, m, 1) // toggle off
+	if len(m.selectedEntities) != 0 {
+		t.Fatalf("enum selection = %v, want empty after toggling off", m.selectedEntities)
+	}
+}
+
+func TestMultiEnumFieldKeepsSeveral(t *testing.T) {
+	m := newTaggedPlanner(&fakeAsana{}, "multi_enum", PlanTask{Title: "a"})
+	m = step(t, m, keyMsg("t"))
+	m = step(t, m, keyMsg("tab"))
+	m = pick(t, m, 0)
+	m = pick(t, m, 1)
+	if len(m.selectedProducts) != 2 {
+		t.Fatalf("multi_enum selection = %v, want both", m.selectedProducts)
+	}
+}
+
+func TestEscInTagPickerReturnsToReview(t *testing.T) {
+	m := newTaggedPlanner(&fakeAsana{}, "enum", PlanTask{Title: "a"})
+	m = step(t, m, keyMsg("t"))
+	m = pick(t, m, 0)
+	m = step(t, m, keyMsg("esc"))
+	if m.step != plannerStepReview || m.tasks[0].HasTags {
+		t.Fatalf("esc: step=%v hasTags=%v, want review without saving", m.step, m.tasks[0].HasTags)
+	}
+}
+
+func TestClearTaskTags(t *testing.T) {
+	m := newTaggedPlanner(&fakeAsana{}, "enum", PlanTask{Title: "a"})
+	m = step(t, m, keyMsg("t"))
+	m = pick(t, m, 0)
+	m = step(t, m, keyMsg("enter"))
+	m = step(t, m, keyMsg("u"))
+	if m.tasks[0].HasTags {
+		t.Fatal("u should drop the task's own tags")
+	}
+	_ = m.View()
 }

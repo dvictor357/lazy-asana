@@ -31,6 +31,12 @@ type PlanTask struct {
 	DueDate     string
 	Subtasks    []PlanTask
 
+	// Per-task Company/Entity and Product/Project choices (enum option GIDs).
+	// When HasTags is false the batch default chosen at submit time applies.
+	HasTags  bool
+	Entities map[string]bool
+	Products map[string]bool
+
 	// Submission progress, so a resubmit after a failure skips what Asana
 	// already has instead of creating duplicates.
 	GID    string // set once the task exists in Asana
@@ -81,11 +87,15 @@ type PlannerModel struct {
 	// tagging step
 	entityOptions    []asana.EnumOption
 	productOptions   []asana.EnumOption
-	selectedEntities map[string]bool
+	selectedEntities map[string]bool // picker state while tagging
 	selectedProducts map[string]bool
+	batchEntities    map[string]bool // default for tasks without their own tags
+	batchProducts    map[string]bool
 	taggingSection   int // 0=entity, 1=product
 	taggingCursor    int
 	taggingLoading   bool
+	tagOptionsLoaded bool
+	tagTarget        int // task index being tagged from Review, or -1 for the batch default
 
 	// month sections of the default project, loaded before confirm
 	sections       []asana.Section
@@ -157,6 +167,7 @@ func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.
 		llmStartDate: sd,
 		spinner:      sp,
 		planDays:     5,
+		tagTarget:    -1,
 	}
 }
 

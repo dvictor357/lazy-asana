@@ -218,6 +218,14 @@ func (m PlannerModel) viewReview() string {
 			b.WriteString(DimStyle.Render(fmt.Sprintf("   Due: %s", t.DueDate)))
 			b.WriteString("\n")
 		}
+		if m.hasTagFields() {
+			if t.HasTags {
+				b.WriteString(HighlightStyle.Render("   Tags: " + m.tagLabel(t)))
+			} else {
+				b.WriteString(DimStyle.Render("   Tags: batch default"))
+			}
+			b.WriteString("\n")
+		}
 		for _, sub := range t.Subtasks {
 			subH := ""
 			if sub.Hours > 0 {
@@ -237,14 +245,23 @@ func (m PlannerModel) viewReview() string {
 	b.WriteString("\n")
 	b.WriteString(HighlightStyle.Render(fmt.Sprintf("Total: %.1f hours across %d tasks", totalHours, total)))
 	b.WriteString("\n\n")
-	b.WriteString(DimStyle.Render("↑/k↓/j navigate • d delete task • enter submit • esc go back"))
+	help := "↑/k↓/j navigate • d delete task • enter submit • esc go back"
+	if m.hasTagFields() {
+		help = "↑/k↓/j navigate • t tag task • u use batch tags • d delete • enter submit • esc back"
+	}
+	b.WriteString(DimStyle.Render(help))
 
 	return b.String()
 }
 
 func (m PlannerModel) viewTagging() string {
 	var b strings.Builder
-	b.WriteString(HeaderStyle.Render("Tag Tasks"))
+	if m.tagTarget >= 0 && m.tagTarget < len(m.tasks) {
+		b.WriteString(HeaderStyle.Render("Tag Task: " + m.tasks[m.tagTarget].Title))
+	} else {
+		b.WriteString(HeaderStyle.Render("Default Tags"))
+		b.WriteString("\n" + DimStyle.Render("Applies to every task without its own tags (set them with t in Review)."))
+	}
 	b.WriteString("\n\n")
 
 	if m.taggingLoading {
@@ -303,10 +320,16 @@ func (m PlannerModel) viewTagging() string {
 		b.WriteString("\n")
 	}
 
-	renderSection("Company/Entity", m.entityOptions, m.selectedEntities, m.taggingSection == 0, m.taggingCursor)
-	renderSection("Product/Project", m.productOptions, m.selectedProducts, m.taggingSection == 1, m.taggingCursor)
+	label := func(name, fieldType string) string {
+		if fieldType == "multi_enum" {
+			return name + " (pick any)"
+		}
+		return name + " (pick one)"
+	}
+	renderSection(label("Company/Entity", m.cfg.EntityFieldType), m.entityOptions, m.selectedEntities, m.taggingSection == 0, m.taggingCursor)
+	renderSection(label("Product/Project", m.cfg.ProductFieldType), m.productOptions, m.selectedProducts, m.taggingSection == 1, m.taggingCursor)
 
-	b.WriteString(DimStyle.Render("↑/k↓/j navigate • space toggle • tab switch section • enter confirm • esc back"))
+	b.WriteString(DimStyle.Render("↑/k↓/j navigate • space select • tab switch field • enter save • esc back to review"))
 	return b.String()
 }
 
@@ -352,6 +375,9 @@ func (m PlannerModel) viewConfirm() string {
 			}
 		}
 		b.WriteString(fmt.Sprintf("  %d. %s  %s  %s\n", i+1, padRight(t.Title, 40), DimStyle.Render(t.DueDate), where))
+		if m.hasTagFields() {
+			b.WriteString(DimStyle.Render("     tags: "+m.tagLabel(t)) + "\n")
+		}
 	}
 	b.WriteString("\n")
 
