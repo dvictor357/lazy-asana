@@ -41,8 +41,15 @@ What it does:
 - week view: hours per day (Mon–Sun) against 8h, the week total against
   40h, and the week's tasks
 - month view: hours per week of the month, with total, average and best week
-- data comes from tasks in the default project with a due date in the
-  period, filtered to your user when `user_gid` is saved
+- scope (`p` switches, shown under the header):
+  - `Default project`: tasks in the default project with a due date in the
+    period, filtered to your user when `user_gid` is saved
+  - `All my tasks`: every task assigned to you in the workspace with a due
+    date in the period, whatever project it is in (needs `user_gid`; re-bind
+    if it is missing)
+- the week's task list shows each task's projects, so you can spot tasks
+  outside the planner before moving them
+- a fast `←`/`→` or scope switch never shows an older, slower response
 
 Keys:
 
@@ -55,6 +62,7 @@ Keys:
 | `space` | Week view: pick or unpick the task for moving |
 | `a` | Week view: pick or clear all tasks |
 | `M` | Week view: move the picked tasks (or the highlighted one) to a project |
+| `p` | Switch scope: Default project / All my tasks |
 | `r` | Refresh |
 | `esc` | Back to the main menu |
 

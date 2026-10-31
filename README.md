@@ -55,6 +55,7 @@ The app then writes config to `~/.config/lazy-asana/config.json`.
 ### Insights
 
 - Week view: hours per day against 8h and the week's tasks; month view: hours per week.
+- `p` switches scope between the default project and all your tasks in the workspace.
 - Pick tasks in the week view and press `M` to move them to another project and section, optionally removing them from a source project.
 
 ### Task Composer

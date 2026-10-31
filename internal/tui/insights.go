@@ -21,6 +21,7 @@ const (
 )
 
 type insightsResult struct {
+	seq   int // matches InsightsModel.seq of the request; older results are dropped
 	tasks []asana.Task
 	err   error
 }
@@ -53,6 +54,8 @@ type InsightsModel struct {
 	spinner   spinner.Model
 	width     int
 	selected  map[string]bool // task GIDs picked for Move Tasks (week view)
+	allTasks  bool            // scope: every task of yours in the workspace, not just the default project
+	seq       int             // id of the latest fetch
 }
 
 func NewInsightsModel(cfg *config.Config, client asana.AsanaClient) InsightsModel {
@@ -69,8 +72,35 @@ func NewInsightsModel(cfg *config.Config, client asana.AsanaClient) InsightsMode
 	}
 }
 
+// Init is unused for loading: the app calls startFetch so the request's
+// sequence number is stored on the model it keeps.
 func (m InsightsModel) Init() tea.Cmd {
-	return tea.Batch(m.fetchCmd(), m.spinner.Tick)
+	return nil
+}
+
+// scopeBar shows both scopes with the active one highlighted.
+func (m InsightsModel) scopeBar() string {
+	def, all := DimStyle.Render("Default project"), DimStyle.Render("All my tasks")
+	if m.allTasks {
+		all = HighlightStyle.Render("All my tasks")
+	} else {
+		def = HighlightStyle.Render("Default project")
+	}
+	return LabelStyle.Render("Scope: ") + def + DimStyle.Render(" / ") + all + DimStyle.Render("  (p to switch)")
+}
+
+// taskProjects lists the projects a task belongs to, e.g. "Planner 2026, elfo-Omnichannel".
+func taskProjects(t asana.Task) string {
+	var names []string
+	for _, mem := range t.Memberships {
+		if mem.Project.Name != "" {
+			names = append(names, mem.Project.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "no project"
+	}
+	return strings.Join(names, ", ")
 }
 
 func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -86,6 +116,9 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case insightsResult:
+		if msg.seq != m.seq {
+			return m, nil // a newer fetch is in flight (fast ←/→ or scope switch)
+		}
 		m.loading = false
 		m.firstLoad = false
 		m.selected = nil // the task list changed; old picks may be gone
@@ -130,16 +163,14 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode != insightModeWeek {
 				m.mode = insightModeWeek
 				m.cursor = 0
-				m.loading = true
-				return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+				return m.startFetch()
 			}
 
 		case "m":
 			if m.mode != insightModeMonth {
 				m.mode = insightModeMonth
 				m.cursor = 0
-				m.loading = true
-				return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+				return m.startFetch()
 			}
 
 		case "enter":
@@ -152,12 +183,19 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.mode = insightModeWeek
 					m.cursor = 0
-					m.loading = true
-					return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+					return m.startFetch()
 				}
 			}
 
 		case "r":
+			return m.reload()
+
+		case "p":
+			if !m.allTasks && m.cfg.UserGID == "" {
+				return m, errorCmd("All my tasks needs your Asana user — re-bind your account first")
+			}
+			m.allTasks = !m.allTasks
+			m.cursor = 0
 			return m.reload()
 
 		case " ":
@@ -204,9 +242,8 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // reload fetches the current period again, keeping the week or month in view.
 func (m InsightsModel) reload() (InsightsModel, tea.Cmd) {
-	m.loading = true
 	m.selected = nil
-	return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+	return m.startFetch()
 }
 
 // tasksToMove returns the picked tasks, or the highlighted one when none are.
@@ -229,13 +266,22 @@ func (m InsightsModel) navigate(dir int) (tea.Model, tea.Cmd) {
 	} else {
 		m.refDate = m.refDate.AddDate(0, dir, 0)
 	}
-	m.loading = true
 	m.cursor = 0
 	m.selected = nil
-	return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+	return m.startFetch()
 }
 
-func (m InsightsModel) fetchCmd() tea.Cmd {
+// startFetch marks the model loading and starts a fetch tagged with a new
+// sequence number. Always use the returned model, so results of older
+// fetches are recognised and dropped.
+func (m InsightsModel) startFetch() (InsightsModel, tea.Cmd) {
+	m.seq++
+	m.loading = true
+	return m, tea.Batch(m.fetchCmd(m.seq), m.spinner.Tick, clearError)
+}
+
+func (m InsightsModel) fetchCmd(seq int) tea.Cmd {
+	allTasks := m.allTasks
 	client := m.client
 	cfg := m.cfg
 	mode := m.mode
@@ -243,7 +289,7 @@ func (m InsightsModel) fetchCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		if client == nil {
-			return insightsResult{err: fmt.Errorf("asana client not configured")}
+			return insightsResult{seq: seq, err: fmt.Errorf("asana client not configured")}
 		}
 
 		var start, end string
@@ -254,9 +300,11 @@ func (m InsightsModel) fetchCmd() tea.Cmd {
 		}
 
 		filters := url.Values{
-			"projects.any":  {cfg.DefaultProjectGID},
 			"due_on.after":  {shiftDate(start, -1)},
 			"due_on.before": {shiftDate(end, 1)},
+		}
+		if !allTasks {
+			filters.Set("projects.any", cfg.DefaultProjectGID)
 		}
 		if cfg.UserGID != "" {
 			filters["assignee.any"] = []string{cfg.UserGID}
@@ -264,9 +312,9 @@ func (m InsightsModel) fetchCmd() tea.Cmd {
 
 		tasks, err := client.SearchTasks(cfg.DefaultWorkspaceGID, filters)
 		if err != nil {
-			return insightsResult{err: err}
+			return insightsResult{seq: seq, err: err}
 		}
-		return insightsResult{tasks: tasks}
+		return insightsResult{seq: seq, tasks: tasks}
 	}
 }
 
@@ -403,6 +451,8 @@ func (m InsightsModel) viewWeek() string {
 	header := fmt.Sprintf("Week %d  ·  %s → %s", wn, start, end)
 	b.WriteString(HeaderStyle.Render(header) + "  " + modeBar)
 	b.WriteString("\n")
+	b.WriteString(m.scopeBar())
+	b.WriteString("\n")
 	b.WriteString(DimStyle.Render("← prev week") + strings.Repeat(" ", 30) + DimStyle.Render("next week →"))
 	b.WriteString("\n\n")
 
@@ -477,8 +527,9 @@ func (m InsightsModel) viewWeek() string {
 				check = SuccessStyle.Render("[x]")
 			}
 			name := padRight(t.Name, 45)
-			b.WriteString(fmt.Sprintf("%s%s %s  %s  %4.1fh  %s\n",
-				cur, check, style.Render(name), DimStyle.Render(t.DueOn), h, status))
+			b.WriteString(fmt.Sprintf("%s%s %s  %s  %4.1fh  %s  %s\n",
+				cur, check, style.Render(name), DimStyle.Render(t.DueOn), h, status,
+				DimStyle.Render(padRight(taskProjects(t), 30))))
 		}
 		if end2 < total {
 			b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more\n", total-end2)))
@@ -486,7 +537,7 @@ func (m InsightsModel) viewWeek() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(DimStyle.Render("← → weeks • ↑/k↓/j tasks • space select • a all • M move to project • m month • r refresh • esc back"))
+	b.WriteString(DimStyle.Render("← → weeks • ↑/k↓/j tasks • space select • a all • M move to project • p scope • m month • r refresh • esc back"))
 	return b.String()
 }
 
@@ -496,6 +547,8 @@ func (m InsightsModel) viewMonth() string {
 	modeBar := DimStyle.Render("[w]eek") + "  " + DimStyle.Render("[m]onth")
 	header := m.refDate.Format("January 2006")
 	b.WriteString(HeaderStyle.Render(header) + "  " + modeBar)
+	b.WriteString("\n")
+	b.WriteString(m.scopeBar())
 	b.WriteString("\n")
 	b.WriteString(DimStyle.Render("← prev month") + strings.Repeat(" ", 28) + DimStyle.Render("next month →"))
 	b.WriteString("\n\n")
@@ -558,6 +611,6 @@ func (m InsightsModel) viewMonth() string {
 		b.WriteString(fmt.Sprintf("   Best: W%d (%.1fh)", bestW, bestH))
 	}
 	b.WriteString("\n\n")
-	b.WriteString(DimStyle.Render("← → navigate months • ↑/k↓/j select week • enter drill into week • w week view • r refresh • esc back"))
+	b.WriteString(DimStyle.Render("← → navigate months • ↑/k↓/j select week • enter drill into week • w week view • p scope • r refresh • esc back"))
 	return b.String()
 }

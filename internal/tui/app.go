@@ -99,7 +99,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.menu = NewMenu(a.cfg.IsBound(), a.llm != nil)
 		case screenInsights:
 			a.insights = NewInsightsModel(a.cfg, a.asana)
-			return a, tea.Batch(a.insights.Init())
+			var cmd tea.Cmd
+			a.insights, cmd = a.insights.startFetch()
+			return a, cmd
 		}
 		return a, nil
 	case ErrorMsg:
