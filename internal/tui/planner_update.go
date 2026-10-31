@@ -18,6 +18,10 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
+			if m.step == plannerStepSubmitting {
+				// Leaving mid-submit would silently stop the chain halfway.
+				return m, nil
+			}
 			if m.step == plannerStepMenu {
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 			}
@@ -30,6 +34,13 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+	}
+
+	if r, ok := msg.(sectionsResult); ok {
+		m.sections = r.sections
+		m.sectionsErr = r.err
+		m.sectionsLoaded = true
+		return m, nil
 	}
 
 	switch m.step {
@@ -85,6 +96,7 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.tasks) == 0 {
 				return *m, nil
 			}
+			m.clampCursors()
 			m.step = plannerStepAddSubtask
 			m.subParent = m.cursor
 			m.fieldCursor = 0
@@ -244,7 +256,11 @@ func (m *PlannerModel) handleSaveTask() tea.Cmd {
 		DueDate:     m.dateInput.Value(),
 	}
 
-	if m.step == plannerStepAddSubtask && m.subParent < len(m.tasks) {
+	if m.step == plannerStepAddSubtask {
+		if m.subParent < 0 || m.subParent >= len(m.tasks) {
+			m.step = plannerStepMenu
+			return func() tea.Msg { return ErrorMsg{Message: "parent task no longer exists — subtask not added"} }
+		}
 		m.tasks[m.subParent].Subtasks = append(m.tasks[m.subParent].Subtasks, task)
 	} else {
 		m.tasks = append(m.tasks, task)
@@ -272,12 +288,18 @@ func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "d", "delete":
 		if len(m.tasks) > 0 {
 			m.tasks = append(m.tasks[:m.reviewCursor], m.tasks[m.reviewCursor+1:]...)
-			if m.reviewCursor >= len(m.tasks) && m.reviewCursor > 0 {
-				m.reviewCursor--
+			m.clampCursors()
+			if len(m.tasks) == 0 {
+				m.step = plannerStepMenu
 			}
 		}
 	case "enter":
 		if len(m.tasks) > 0 {
+			// Load the default project's sections now, so confirm can show and
+			// verify each task's month column before anything is sent.
+			m.sections = nil
+			m.sectionsErr = ""
+			m.sectionsLoaded = false
 			if m.cfg.EntityFieldGID != "" || m.cfg.ProductFieldGID != "" {
 				m.step = plannerStepTagging
 				m.taggingLoading = true
@@ -285,9 +307,10 @@ func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taggingCursor = 0
 				m.selectedEntities = map[string]bool{}
 				m.selectedProducts = map[string]bool{}
-				return *m, tea.Batch(m.fetchTagOptions(), m.spinner.Tick)
+				return *m, tea.Batch(m.fetchTagOptions(), m.fetchSections(), m.spinner.Tick)
 			}
 			m.step = plannerStepConfirm
+			return *m, tea.Batch(m.fetchSections(), m.spinner.Tick)
 		}
 	}
 	return *m, nil
@@ -298,10 +321,12 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		switch t := msg.(type) {
 		case submitResult:
+			m.applySubmitResult(t)
 			m.submitIdx = t.idx
 			if t.err != "" {
-				m.step = plannerStepMenu
-				return *m, func() tea.Msg { return ErrorMsg{Message: t.err} }
+				m.step = plannerStepReview
+				msg := t.err + " — tasks already in Asana are marked ✓ and skipped on resubmit"
+				return *m, func() tea.Msg { return ErrorMsg{Message: msg} }
 			}
 			if t.done {
 				m.step = plannerStepDone
@@ -312,12 +337,30 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return *m, nil
 	}
 
+	// Keys are ignored while submitting: a second enter must not start a
+	// second submit chain.
+	if m.step != plannerStepConfirm {
+		return *m, nil
+	}
+
 	switch k.String() {
 	case "y", "enter":
+		if !m.sectionsLoaded {
+			return *m, nil
+		}
+		if m.sectionsErr != "" {
+			msg := "cannot load project sections: " + m.sectionsErr + " — press n, then enter to retry"
+			return *m, func() tea.Msg { return ErrorMsg{Message: msg} }
+		}
+		if probs := m.placementProblems(); len(probs) > 0 {
+			return *m, func() tea.Msg {
+				return ErrorMsg{Message: "create the missing month section in Asana first: " + probs[0]}
+			}
+		}
 		m.submitIdx = 0
 		m.step = plannerStepSubmitting
 		return *m, tea.Batch(m.submitNext(0), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
-	case "n", "esc":
+	case "n":
 		m.step = plannerStepReview
 	}
 	return *m, nil
@@ -330,6 +373,7 @@ func (m *PlannerModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if k.String() == "enter" || k.String() == "esc" {
 		m.tasks = nil
+		m.clampCursors()
 		m.step = plannerStepMenu
 	}
 	return *m, nil

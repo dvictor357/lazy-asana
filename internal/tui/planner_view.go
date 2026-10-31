@@ -18,7 +18,11 @@ func (m PlannerModel) View() string {
 	case plannerStepAddTask:
 		s += m.viewAddTask("Add Task")
 	case plannerStepAddSubtask:
-		s += m.viewAddTask(fmt.Sprintf("Add Subtask to: %s", m.tasks[m.subParent].Title))
+		parent := "(missing)"
+		if m.subParent >= 0 && m.subParent < len(m.tasks) {
+			parent = m.tasks[m.subParent].Title
+		}
+		s += m.viewAddTask(fmt.Sprintf("Add Subtask to: %s", parent))
 	case plannerStepReview:
 		s += m.viewReview()
 	case plannerStepTagging:
@@ -96,7 +100,7 @@ func (m PlannerModel) viewMenu() string {
 }
 
 func (m PlannerModel) selectedTaskName() string {
-	if len(m.tasks) == 0 {
+	if m.cursor < 0 || m.cursor >= len(m.tasks) {
 		return "(none)"
 	}
 	return m.tasks[m.cursor].Title
@@ -197,7 +201,14 @@ func (m PlannerModel) viewReview() string {
 			cursor = "> "
 			style = HighlightStyle
 		}
-		b.WriteString(style.Render(fmt.Sprintf("%s%d. %s%s", cursor, i+1, t.Title, hoursStr)))
+		status := ""
+		switch {
+		case t.submitted():
+			status = SuccessStyle.Render("  ✓ in Asana")
+		case t.GID != "":
+			status = ErrorStyle.Render("  ◐ partly sent — resubmit finishes it")
+		}
+		b.WriteString(style.Render(fmt.Sprintf("%s%d. %s%s", cursor, i+1, t.Title, hoursStr)) + status)
 		b.WriteString("\n")
 		if t.Description != "" {
 			b.WriteString(DimStyle.Render(fmt.Sprintf("   %s", t.Description)))
@@ -303,9 +314,56 @@ func (m PlannerModel) viewConfirm() string {
 	var b strings.Builder
 	b.WriteString(HeaderStyle.Render("Confirm Submission"))
 	b.WriteString("\n\n")
-	b.WriteString(ValueStyle.Render(fmt.Sprintf("Submit %d task(s) to Asana?", len(m.tasks))))
+	if !m.sectionsLoaded {
+		b.WriteString(m.spinner.View() + " Loading month sections...\n")
+		return b.String()
+	}
+	if m.sectionsErr != "" {
+		b.WriteString(ErrorStyle.Render("Cannot load project sections: " + m.sectionsErr))
+		b.WriteString("\n\n" + DimStyle.Render("n back to review (enter there retries) • esc menu"))
+		return b.String()
+	}
+
+	pending := 0
+	for _, t := range m.tasks {
+		if !t.submitted() {
+			pending++
+		}
+	}
+	b.WriteString(ValueStyle.Render(fmt.Sprintf("Submit %d task(s) to Asana?", pending)))
+	if done := len(m.tasks) - pending; done > 0 {
+		b.WriteString(DimStyle.Render(fmt.Sprintf("  (%d already in Asana, skipped)", done)))
+	}
 	b.WriteString("\n\n")
-	b.WriteString(DimStyle.Render("y/enter confirm • n/esc cancel"))
+
+	for i, t := range m.tasks {
+		if t.submitted() {
+			continue
+		}
+		var where string
+		switch {
+		case t.DueDate == "":
+			where = DimStyle.Render("no due date → project's default section")
+		default:
+			if sec, ok := monthSection(m.sections, t.DueDate); ok {
+				where = SuccessStyle.Render("→ " + sec.Name)
+			} else {
+				where = ErrorStyle.Render("→ month section missing")
+			}
+		}
+		b.WriteString(fmt.Sprintf("  %d. %s  %s  %s\n", i+1, padRight(t.Title, 40), DimStyle.Render(t.DueDate), where))
+	}
+	b.WriteString("\n")
+
+	if probs := m.placementProblems(); len(probs) > 0 {
+		for _, p := range probs {
+			b.WriteString(ErrorStyle.Render("✗ "+p) + "\n")
+		}
+		b.WriteString(ErrorStyle.Render("Create the missing section(s) in Asana, then retry.") + "\n\n")
+		b.WriteString(DimStyle.Render("n back to review • esc menu"))
+		return b.String()
+	}
+	b.WriteString(DimStyle.Render("y/enter confirm • n back to review • esc menu"))
 	return b.String()
 }
 

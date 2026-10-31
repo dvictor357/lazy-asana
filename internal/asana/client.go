@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-const baseURL = "https://app.asana.com/api/1.0"
+// baseURL is a var so tests can point the client at an httptest server.
+var baseURL = "https://app.asana.com/api/1.0"
 
 // RetryMax is the maximum number of retries for transient errors.
 // 0 means use the default (3). Set to a negative value to disable retries.
@@ -89,7 +90,20 @@ func (c *Client) doRequestRet(method, path string, body interface{}) (json.RawMe
 
 // doRequestWithRetry retries on 429 (rate limit) and 5xx errors with
 // exponential backoff. Uses c.RetryMax (0 means DefaultRetryMax).
+// Only use it for idempotent requests: a 5xx can arrive after Asana already
+// applied the change.
 func (c *Client) doRequestWithRetry(method, path string, body interface{}) (json.RawMessage, error) {
+	return c.retryLoop(method, path, body, true)
+}
+
+// doCreateWithRetry is for non-idempotent creates. It retries only on 429,
+// which Asana returns before processing the request. A 5xx is returned as-is
+// because the object may already exist, and retrying would duplicate it.
+func (c *Client) doCreateWithRetry(method, path string, body interface{}) (json.RawMessage, error) {
+	return c.retryLoop(method, path, body, false)
+}
+
+func (c *Client) retryLoop(method, path string, body interface{}, retry5xx bool) (json.RawMessage, error) {
 	maxRetries := c.RetryMax
 	if maxRetries == 0 {
 		maxRetries = DefaultRetryMax
@@ -104,14 +118,15 @@ func (c *Client) doRequestWithRetry(method, path string, body interface{}) (json
 			return data, nil
 		}
 
-		// Only retry on transient errors (429 rate limit, 5xx server errors).
-		if status != 429 && status < 500 {
+		// Only retry on transient errors (429 rate limit, optionally 5xx).
+		transient := status == 429 || (retry5xx && status >= 500)
+		if !transient {
 			return nil, err
 		}
 
 		// Last attempt — don't sleep before giving up.
 		if attempt == maxRetries {
-			return nil, fmt.Errorf("asana: retry %d/%d: %w", attempt+1, maxRetries, err)
+			return nil, fmt.Errorf("asana: gave up after %d retries: %w", maxRetries, err)
 		}
 
 		time.Sleep(retryDelay(attempt))
@@ -289,7 +304,7 @@ func (c *Client) CreateTask(input map[string]interface{}) (*Task, error) {
 	body := map[string]interface{}{
 		"data": input,
 	}
-	data, err := c.doRequestWithRetry("POST", "/tasks", body)
+	data, err := c.doCreateWithRetry("POST", "/tasks", body)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +317,7 @@ func (c *Client) CreateSubtask(parentGID string, input map[string]interface{}) (
 		"data": input,
 	}
 	path := fmt.Sprintf("/tasks/%s/subtasks", parentGID)
-	data, err := c.doRequestWithRetry("POST", path, body)
+	data, err := c.doCreateWithRetry("POST", path, body)
 	if err != nil {
 		return nil, err
 	}

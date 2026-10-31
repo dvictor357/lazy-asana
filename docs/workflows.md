@@ -112,6 +112,20 @@ Submission behavior:
 - creates subtasks beneath the new parent task
 - writes `due_on` when available
 - writes the numeric hours custom field only when `actual_hours_field_gid` is known
+- moves each task with a due date into the default project's section for that month (`October`, `October 2026`, `Oct` or `Oct 2026`, case-insensitive; a name with the matching year wins)
+- tasks without a due date stay in the project's default section
+
+Month sections:
+
+- the confirm screen lists each task's target section before anything is sent
+- if a task's month section does not exist, submission is blocked until you create it in Asana
+
+Failures and resubmits:
+
+- each task remembers what already reached Asana (task, month section, each subtask)
+- after a failure you land back on Review, where sent tasks show `✓ in Asana` and half-sent ones `◐ partly sent`
+- submitting again skips what Asana already has, so nothing is created twice
+- `enter` and `esc` are ignored while a submit is running
 
 ## Move Tasks
 

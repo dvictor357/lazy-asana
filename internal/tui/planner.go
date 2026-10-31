@@ -30,6 +30,24 @@ type PlanTask struct {
 	Hours       float64
 	DueDate     string
 	Subtasks    []PlanTask
+
+	// Submission progress, so a resubmit after a failure skips what Asana
+	// already has instead of creating duplicates.
+	GID    string // set once the task exists in Asana
+	Placed bool   // month section applied (or none needed)
+}
+
+// submitted reports whether the task and all its subtasks exist in Asana.
+func (t PlanTask) submitted() bool {
+	if t.GID == "" || !t.Placed {
+		return false
+	}
+	for _, s := range t.Subtasks {
+		if s.GID == "" {
+			return false
+		}
+	}
+	return true
 }
 
 type PlannerModel struct {
@@ -68,6 +86,28 @@ type PlannerModel struct {
 	taggingSection   int // 0=entity, 1=product
 	taggingCursor    int
 	taggingLoading   bool
+
+	// month sections of the default project, loaded before confirm
+	sections       []asana.Section
+	sectionsLoaded bool
+	sectionsErr    string
+}
+
+// clampCursors keeps every task index valid after the task list shrinks.
+func (m *PlannerModel) clampCursors() {
+	n := len(m.tasks)
+	if m.cursor >= n {
+		m.cursor = n - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.reviewCursor >= n {
+		m.reviewCursor = n - 1
+	}
+	if m.reviewCursor < 0 {
+		m.reviewCursor = 0
+	}
 }
 
 func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.LLMClient) PlannerModel {
