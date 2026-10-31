@@ -92,6 +92,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.hours = NewHoursModel(a.cfg, a.asana)
 		case screenPlanner:
 			a.planner = NewPlannerModel(a.cfg, a.asana, a.llm)
+			a.planner.width = a.width
 			if a.llm != nil {
 				a.chat = NewChatModel(a.llm)
 			}

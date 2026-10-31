@@ -30,7 +30,7 @@ func (m *PlannerModel) updateLLMPlan(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Subtasks:    convertSubtasks(pt.Subtasks),
 				})
 			}
-			m.step = plannerStepMenu
+			m.step = plannerStepComposer
 			return *m, nil
 		}
 		return *m, nil

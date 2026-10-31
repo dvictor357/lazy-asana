@@ -23,7 +23,7 @@ func NewMenu(bound, hasLLM bool) MenuModel {
 	items := []menuItem{
 		{title: "Bind Account", desc: "Configure Asana & OpenRouter API keys"},
 		{title: "Show Week Hours", desc: "View actual hours for a given week"},
-		{title: "Plan Day/Week", desc: "Plan and create tasks with LLM assistance"},
+		{title: "Task Composer", desc: "Compose, tag and submit tasks to Asana (LLM planning optional)"},
 		{title: "Move Tasks", desc: "Move tasks between projects by date range"},
 		{title: "Chat with AI", desc: "Chat with the AI assistant"},
 		{title: "Insights", desc: "Interactive weekly/monthly hours breakdown with charts"},

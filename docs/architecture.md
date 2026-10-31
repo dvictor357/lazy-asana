@@ -85,7 +85,7 @@ The menu currently exposes:
 
 - `Bind Account`
 - `Show Week Hours`
-- `Plan Day/Week`
+- `Task Composer`
 - `Move Tasks`
 
 `screenChat` exists in the app router but does not currently have a menu entry.

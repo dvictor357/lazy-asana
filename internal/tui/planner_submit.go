@@ -239,6 +239,6 @@ func (m *PlannerModel) handleLLMSubmit() tea.Cmd {
 	if len(m.tasks) == 0 {
 		return nil
 	}
-	m.step = plannerStepReview
+	m.step = plannerStepComposer
 	return nil
 }

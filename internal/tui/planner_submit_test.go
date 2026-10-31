@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -133,7 +134,7 @@ func newPlanner(f *fakeAsana, tasks ...PlanTask) PlannerModel {
 // submitFromReview goes review → confirm (sections load) → enter.
 func submitFromReview(t *testing.T, m PlannerModel) PlannerModel {
 	t.Helper()
-	m.step = plannerStepReview
+	m.step = plannerStepComposer
 	m = step(t, m, keyMsg("enter"))
 	if m.step != plannerStepConfirm || !m.sectionsLoaded {
 		t.Fatalf("after review enter: step=%v sectionsLoaded=%v, want confirm with sections", m.step, m.sectionsLoaded)
@@ -144,7 +145,7 @@ func submitFromReview(t *testing.T, m PlannerModel) PlannerModel {
 func TestSecondEnterWhileSubmittingIsIgnored(t *testing.T) {
 	f := &fakeAsana{sections: monthSections}
 	m := newPlanner(f, PlanTask{Title: "a", DueDate: "2026-10-20"})
-	m.step = plannerStepReview
+	m.step = plannerStepComposer
 	m = step(t, m, keyMsg("enter")) // to confirm, sections loaded
 
 	r, first := m.Update(keyMsg("enter"))
@@ -181,7 +182,7 @@ func TestResubmitAfterTaskFailureSkipsCreated(t *testing.T) {
 		PlanTask{Title: "b", DueDate: "2026-10-21"},
 	)
 	m = submitFromReview(t, m)
-	if m.step != plannerStepReview {
+	if m.step != plannerStepComposer {
 		t.Fatalf("after failure step=%v, want review", m.step)
 	}
 	if !m.tasks[0].submitted() || m.tasks[1].GID != "" {
@@ -259,26 +260,67 @@ func TestMissingMonthSectionBlocksSubmit(t *testing.T) {
 
 func TestStaleCursorAfterDeleteDoesNotPanic(t *testing.T) {
 	m := newPlanner(&fakeAsana{}, PlanTask{Title: "a"}, PlanTask{Title: "b"})
-	m = step(t, m, keyMsg("tab")) // planner cursor → task 2
-	m.step = plannerStepReview
-	m = step(t, m, keyMsg("d")) // delete task 1
-	m = step(t, m, keyMsg("esc"))
+	m = step(t, m, keyMsg("j")) // select task 2
+	m = step(t, m, keyMsg("d")) // delete it
+	if m.reviewCursor != 0 {
+		t.Fatalf("cursor=%d, want 0 after deleting the last row", m.reviewCursor)
+	}
 	_ = m.View()
 
-	m.step = plannerStepMenu
-	m.menuIdx = 1 // Add Subtask
-	m = step(t, m, keyMsg("enter"))
+	m = step(t, m, keyMsg("s")) // add subtask to the remaining task
 	_ = m.View()
-	if m.subParent != 0 {
-		t.Fatalf("subParent=%d, want 0 (the only task left)", m.subParent)
+	if m.step != plannerStepAddSubtask || m.subParent != 0 {
+		t.Fatalf("step=%v subParent=%d, want subtask form for task 0", m.step, m.subParent)
 	}
 }
 
-func TestDeletingLastTaskLeavesReview(t *testing.T) {
+func TestEditTaskKeepsSubtasksAndTags(t *testing.T) {
+	m := newPlanner(&fakeAsana{}, PlanTask{
+		Title: "old", Hours: 1, DueDate: "2026-10-19",
+		Subtasks: []PlanTask{{Title: "s"}}, HasTags: true, Entities: map[string]bool{"e": true},
+	})
+	m = step(t, m, keyMsg("e"))
+	if m.step != plannerStepAddTask || m.titleInput.Value() != "old" || m.hoursInput.Value() != "1" {
+		t.Fatalf("edit form not prefilled: step=%v title=%q hours=%q", m.step, m.titleInput.Value(), m.hoursInput.Value())
+	}
+	m.titleInput.SetValue("new")
+	m.hoursInput.SetValue("2.5")
+	m = step(t, m, keyMsg("enter"))
+	got := m.tasks[0]
+	if len(m.tasks) != 1 || got.Title != "new" || got.Hours != 2.5 || len(got.Subtasks) != 1 || !got.HasTags {
+		t.Fatalf("after edit: %d tasks, %+v", len(m.tasks), got)
+	}
+}
+
+func TestSentTaskCannotBeEdited(t *testing.T) {
+	m := newPlanner(&fakeAsana{}, PlanTask{Title: "a", GID: "g", Placed: true})
+	m = step(t, m, keyMsg("e"))
+	if m.step != plannerStepComposer {
+		t.Fatalf("step=%v, want to stay in composer", m.step)
+	}
+}
+
+func TestComposerViewRendersAtSmallAndLargeWidths(t *testing.T) {
+	m := newPlanner(&fakeAsana{},
+		PlanTask{Title: "a very long task title that will not fit in the column", DueDate: "2026-10-19", Hours: 9,
+			Subtasks: []PlanTask{{Title: "sub", Hours: 1}}},
+		PlanTask{Title: "no date"},
+	)
+	for _, w := range []int{0, 40, 80, 200} {
+		m.width = w
+		if out := m.View(); !strings.Contains(out, "Task Composer") {
+			t.Fatalf("width %d: composer title missing", w)
+		}
+	}
+	m.tasks = nil
+	_ = m.View()
+}
+
+func TestDeletingLastTaskKeepsComposerUsable(t *testing.T) {
 	m := newPlanner(&fakeAsana{}, PlanTask{Title: "a"})
-	m.step = plannerStepReview
+	m.step = plannerStepComposer
 	m = step(t, m, keyMsg("d"))
-	if m.step != plannerStepMenu {
+	if m.step != plannerStepComposer {
 		t.Fatalf("step=%v, want menu after deleting the last task", m.step)
 	}
 	_ = m.View()
@@ -322,7 +364,7 @@ func newTaggedPlanner(f *fakeAsana, prodType string, tasks ...PlanTask) PlannerM
 		ProductFieldGID: "prod", ProductFieldType: prodType,
 	}, f, nil)
 	m.tasks = tasks
-	m.step = plannerStepReview
+	m.step = plannerStepComposer
 	return m
 }
 
@@ -349,7 +391,7 @@ func TestPerTaskTagsAndBatchDefault(t *testing.T) {
 	m = step(t, m, keyMsg("tab")) // product field
 	m = pick(t, m, 1)             // product Y
 	m = step(t, m, keyMsg("enter"))
-	if m.step != plannerStepReview || !m.tasks[1].HasTags {
+	if m.step != plannerStepComposer || !m.tasks[1].HasTags {
 		t.Fatalf("after save: step=%v hasTags=%v, want back on review with tags", m.step, m.tasks[1].HasTags)
 	}
 
@@ -417,7 +459,7 @@ func TestEscInTagPickerReturnsToReview(t *testing.T) {
 	m = step(t, m, keyMsg("t"))
 	m = pick(t, m, 0)
 	m = step(t, m, keyMsg("esc"))
-	if m.step != plannerStepReview || m.tasks[0].HasTags {
+	if m.step != plannerStepComposer || m.tasks[0].HasTags {
 		t.Fatalf("esc: step=%v hasTags=%v, want review without saving", m.step, m.tasks[0].HasTags)
 	}
 }

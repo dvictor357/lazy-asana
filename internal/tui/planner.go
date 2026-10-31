@@ -13,10 +13,9 @@ import (
 type plannerStep int
 
 const (
-	plannerStepMenu plannerStep = iota
+	plannerStepComposer plannerStep = iota
 	plannerStepAddTask
 	plannerStepAddSubtask
-	plannerStepReview
 	plannerStepTagging
 	plannerStepConfirm
 	plannerStepSubmitting
@@ -61,10 +60,10 @@ type PlannerModel struct {
 	asanaCli  asana.AsanaClient
 	llmCli    llm.LLMClient
 	step      plannerStep
-	menuIdx   int
 	tasks     []PlanTask
-	cursor    int
 	subParent int
+	editIdx   int // task being edited in the form, -1 when adding
+	width     int // terminal width, for the composer table
 
 	titleInput textinput.Model
 	descInput  textarea.Model
@@ -106,12 +105,6 @@ type PlannerModel struct {
 // clampCursors keeps every task index valid after the task list shrinks.
 func (m *PlannerModel) clampCursors() {
 	n := len(m.tasks)
-	if m.cursor >= n {
-		m.cursor = n - 1
-	}
-	if m.cursor < 0 {
-		m.cursor = 0
-	}
 	if m.reviewCursor >= n {
 		m.reviewCursor = n - 1
 	}
@@ -158,7 +151,7 @@ func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.
 		cfg:          cfg,
 		asanaCli:     asanaCli,
 		llmCli:       llmCli,
-		step:         plannerStepMenu,
+		step:         plannerStepComposer,
 		titleInput:   ti,
 		descInput:    di,
 		hoursInput:   hi,
@@ -168,6 +161,7 @@ func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.
 		spinner:      sp,
 		planDays:     5,
 		tagTarget:    -1,
+		editIdx:      -1,
 	}
 }
 

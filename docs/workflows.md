@@ -56,33 +56,44 @@ Input flow:
 - `enter` fetches tasks
 - `esc` goes back
 
-## Plan Day/Week
+## Task Composer
 
-Main menu label: `Plan Day/Week`
+Main menu label: `Task Composer`
 
-Planner menu options:
+One screen to build, review and submit tasks. Tasks stay in local memory
+until you submit them.
 
-- `Add Task`
-- `Add Subtask`
-- `LLM Auto-Plan`
-- `Review & Submit`
+Layout:
 
-### Planner Menu
+- a table with one row per task: due date, title, hours, Company/Entity,
+  Product/Project, target month section and status (`·` not sent,
+  `◐` partly sent, `✓` in Asana); subtasks show indented under their parent
+- hours per due date against an 8h day, plus the total
+- a detail panel for the selected task (title, description, hours, due
+  date, section, tags, status)
+- columns narrow on small terminals so rows never wrap
 
-- `tab` cycles the currently selected parent task when tasks already exist
-- `enter` opens the highlighted planner action
+Keys:
 
-### Manual Task Entry
+| Key | Action |
+| --- | --- |
+| `↑`/`k`, `↓`/`j` | Select task |
+| `a` | Add task |
+| `e` | Edit selected task (not once it is in Asana) |
+| `s` | Add subtask to selected task |
+| `d` | Delete selected task from the local list |
+| `t` | Set tags for the selected task |
+| `u` | Return the selected task to the batch default tags |
+| `L` | LLM Auto-Plan (needs an LLM key) |
+| `enter` | Submit |
+| `esc` | Back to the main menu |
 
-The planner keeps tasks in local memory until you submit them.
+### Task Form
 
-Current state of the manual flow:
-
-- it is intended to collect title, description, hours, and due date
-- the screen exists and tasks can be added to the local plan
-- the richer keyboard flow still needs polish and is less complete than the LLM planning path
-
-If you want the most complete structured-task flow today, use `LLM Auto-Plan`.
+- collects title, description, actual hours and due date (`YYYY-MM-DD`)
+- `tab`/`shift+tab` switch fields, `enter` saves (`ctrl+s` inside the
+  description), `ctrl+g` drafts a description with the LLM, `esc` cancels
+- editing keeps the task's subtasks and tags
 
 ### LLM Auto-Plan
 
@@ -98,13 +109,7 @@ What it does:
 
 The current default model is `deepseek/deepseek-chat-v3-0324`.
 
-### Review And Submit
-
-Before submission, the app lets you:
-
-- review planned tasks
-- delete parent tasks from the local list
-- see total planned hours
+### Submit
 
 Submission behavior:
 
@@ -117,10 +122,10 @@ Submission behavior:
 
 Tags (Company/Entity and Product/Project):
 
-- in Review, `t` sets tags for the highlighted task and `u` returns it to the batch default
+- in the composer, `t` sets tags for the selected task and `u` returns it to the batch default
 - on submit, the default-tag picker appears only if some task has no tags of its own
 - single-select (`enum`) fields keep one option; picking another replaces it. `multi_enum` fields accept several
-- Review and Confirm show each task's tags; one task can carry only one value per `enum` field, so work spanning two products needs two tasks
+- the composer table and Confirm show each task's tags; one task can carry only one value per `enum` field, so work spanning two products needs two tasks
 
 Month sections:
 
@@ -130,7 +135,7 @@ Month sections:
 Failures and resubmits:
 
 - each task remembers what already reached Asana (task, month section, each subtask)
-- after a failure you land back on Review, where sent tasks show `✓ in Asana` and half-sent ones `◐ partly sent`
+- after a failure you land back in the composer, where sent tasks show `✓ in Asana` and half-sent ones `◐ partly sent`
 - submitting again skips what Asana already has, so nothing is created twice
 - `enter` and `esc` are ignored while a submit is running
 

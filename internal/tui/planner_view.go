@@ -9,22 +9,27 @@ import (
 )
 
 func (m PlannerModel) View() string {
-	s := WindowTitle.Render("Plan Day/Week")
+	if m.step == plannerStepComposer {
+		// The composer draws its own frame and uses the full width.
+		return lipgloss.NewStyle().Padding(1, 2).Render(m.viewComposer())
+	}
+
+	s := WindowTitle.Render("Task Composer")
 	s += "\n\n"
 
 	switch m.step {
-	case plannerStepMenu:
-		s += m.viewMenu()
 	case plannerStepAddTask:
-		s += m.viewAddTask("Add Task")
+		header := "Add Task"
+		if m.editIdx >= 0 {
+			header = "Edit Task"
+		}
+		s += m.viewAddTask(header)
 	case plannerStepAddSubtask:
 		parent := "(missing)"
 		if m.subParent >= 0 && m.subParent < len(m.tasks) {
 			parent = m.tasks[m.subParent].Title
 		}
 		s += m.viewAddTask(fmt.Sprintf("Add Subtask to: %s", parent))
-	case plannerStepReview:
-		s += m.viewReview()
 	case plannerStepTagging:
 		s += m.viewTagging()
 	case plannerStepConfirm:
@@ -39,71 +44,6 @@ func (m PlannerModel) View() string {
 	}
 
 	return lipgloss.NewStyle().Padding(2, 4).Render(s)
-}
-
-func (m PlannerModel) viewMenu() string {
-	var b strings.Builder
-
-	menuItems := []struct {
-		label string
-		desc  string
-	}{
-		{"Add Task", "Manually add a new task"},
-		{"Add Subtask", fmt.Sprintf("Add subtask to: %s", m.selectedTaskName())},
-		{"LLM Auto-Plan", "Let AI plan your day/week"},
-		{"Review & Submit", fmt.Sprintf("Submit %d tasks to Asana", len(m.tasks))},
-	}
-
-	for i, item := range menuItems {
-		cursor := "  "
-		style := MenuItem
-		if i == m.menuIdx {
-			cursor = "> "
-			style = MenuItemSelected
-		}
-		b.WriteString(style.Render(fmt.Sprintf("%s%s", cursor, item.label)))
-		b.WriteString("\n")
-		b.WriteString(DimStyle.Render(fmt.Sprintf("    %s", item.desc)))
-		b.WriteString("\n\n")
-	}
-
-	if len(m.tasks) > 0 {
-		b.WriteString(HeaderStyle.Render("Tasks:"))
-		b.WriteString("\n")
-		for i, t := range m.tasks {
-			cursor := "  "
-			style := ValueStyle
-			if i == m.cursor {
-				cursor = "> "
-				style = HighlightStyle
-			}
-			hoursStr := ""
-			if t.Hours > 0 {
-				hoursStr = fmt.Sprintf(" (%.1fh)", t.Hours)
-			}
-			b.WriteString(style.Render(fmt.Sprintf("%s%s%s", cursor, t.Title, hoursStr)))
-			b.WriteString("\n")
-			for _, sub := range t.Subtasks {
-				subHours := ""
-				if sub.Hours > 0 {
-					subHours = fmt.Sprintf(" (%.1fh)", sub.Hours)
-				}
-				b.WriteString(DimStyle.Render(fmt.Sprintf("    └ %s%s", sub.Title, subHours)))
-				b.WriteString("\n")
-			}
-		}
-	}
-
-	b.WriteString("\n")
-	b.WriteString(DimStyle.Render("↑/k↓/j navigate • tab cycle tasks • enter select • esc back"))
-	return b.String()
-}
-
-func (m PlannerModel) selectedTaskName() string {
-	if m.cursor < 0 || m.cursor >= len(m.tasks) {
-		return "(none)"
-	}
-	return m.tasks[m.cursor].Title
 }
 
 func (m PlannerModel) viewAddTask(header string) string {
@@ -155,112 +95,13 @@ func (m PlannerModel) viewAddTask(header string) string {
 	return b.String()
 }
 
-func (m PlannerModel) viewReview() string {
-	var b strings.Builder
-	b.WriteString(HeaderStyle.Render("Review & Submit"))
-	b.WriteString("\n\n")
-
-	const pageSize = 5
-	total := len(m.tasks)
-	start := m.reviewCursor - pageSize/2
-	if start < 0 {
-		start = 0
-	}
-	end := start + pageSize
-	if end > total {
-		end = total
-		start = end - pageSize
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	if start > 0 {
-		b.WriteString(DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
-		b.WriteString("\n")
-	}
-
-	totalHours := 0.0
-	for _, t := range m.tasks {
-		totalHours += t.Hours
-		for _, sub := range t.Subtasks {
-			totalHours += sub.Hours
-		}
-	}
-
-	for i := start; i < end; i++ {
-		t := m.tasks[i]
-		hoursStr := ""
-		if t.Hours > 0 {
-			hoursStr = fmt.Sprintf(" (%.1fh)", t.Hours)
-		}
-
-		cursor := "  "
-		style := ValueStyle
-		if i == m.reviewCursor {
-			cursor = "> "
-			style = HighlightStyle
-		}
-		status := ""
-		switch {
-		case t.submitted():
-			status = SuccessStyle.Render("  ✓ in Asana")
-		case t.GID != "":
-			status = ErrorStyle.Render("  ◐ partly sent — resubmit finishes it")
-		}
-		b.WriteString(style.Render(fmt.Sprintf("%s%d. %s%s", cursor, i+1, t.Title, hoursStr)) + status)
-		b.WriteString("\n")
-		if t.Description != "" {
-			b.WriteString(DimStyle.Render(fmt.Sprintf("   %s", t.Description)))
-			b.WriteString("\n")
-		}
-		if t.DueDate != "" {
-			b.WriteString(DimStyle.Render(fmt.Sprintf("   Due: %s", t.DueDate)))
-			b.WriteString("\n")
-		}
-		if m.hasTagFields() {
-			if t.HasTags {
-				b.WriteString(HighlightStyle.Render("   Tags: " + m.tagLabel(t)))
-			} else {
-				b.WriteString(DimStyle.Render("   Tags: batch default"))
-			}
-			b.WriteString("\n")
-		}
-		for _, sub := range t.Subtasks {
-			subH := ""
-			if sub.Hours > 0 {
-				subH = fmt.Sprintf(" (%.1fh)", sub.Hours)
-			}
-			b.WriteString(DimStyle.Render(fmt.Sprintf("   └ %s%s", sub.Title, subH)))
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-
-	if end < total {
-		b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", total-end)))
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(HighlightStyle.Render(fmt.Sprintf("Total: %.1f hours across %d tasks", totalHours, total)))
-	b.WriteString("\n\n")
-	help := "↑/k↓/j navigate • d delete task • enter submit • esc go back"
-	if m.hasTagFields() {
-		help = "↑/k↓/j navigate • t tag task • u use batch tags • d delete • enter submit • esc back"
-	}
-	b.WriteString(DimStyle.Render(help))
-
-	return b.String()
-}
-
 func (m PlannerModel) viewTagging() string {
 	var b strings.Builder
 	if m.tagTarget >= 0 && m.tagTarget < len(m.tasks) {
 		b.WriteString(HeaderStyle.Render("Tag Task: " + m.tasks[m.tagTarget].Title))
 	} else {
 		b.WriteString(HeaderStyle.Render("Default Tags"))
-		b.WriteString("\n" + DimStyle.Render("Applies to every task without its own tags (set them with t in Review)."))
+		b.WriteString("\n" + DimStyle.Render("Applies to every task without its own tags (set one per task with t in the composer)."))
 	}
 	b.WriteString("\n\n")
 
@@ -329,7 +170,7 @@ func (m PlannerModel) viewTagging() string {
 	renderSection(label("Company/Entity", m.cfg.EntityFieldType), m.entityOptions, m.selectedEntities, m.taggingSection == 0, m.taggingCursor)
 	renderSection(label("Product/Project", m.cfg.ProductFieldType), m.productOptions, m.selectedProducts, m.taggingSection == 1, m.taggingCursor)
 
-	b.WriteString(DimStyle.Render("↑/k↓/j navigate • space select • tab switch field • enter save • esc back to review"))
+	b.WriteString(DimStyle.Render("↑/k↓/j navigate • space select • tab switch field • enter save • esc back to composer"))
 	return b.String()
 }
 
@@ -343,7 +184,7 @@ func (m PlannerModel) viewConfirm() string {
 	}
 	if m.sectionsErr != "" {
 		b.WriteString(ErrorStyle.Render("Cannot load project sections: " + m.sectionsErr))
-		b.WriteString("\n\n" + DimStyle.Render("n back to review (enter there retries) • esc menu"))
+		b.WriteString("\n\n" + DimStyle.Render("n/esc back to composer (enter there retries)"))
 		return b.String()
 	}
 
@@ -386,10 +227,10 @@ func (m PlannerModel) viewConfirm() string {
 			b.WriteString(ErrorStyle.Render("✗ "+p) + "\n")
 		}
 		b.WriteString(ErrorStyle.Render("Create the missing section(s) in Asana, then retry.") + "\n\n")
-		b.WriteString(DimStyle.Render("n back to review • esc menu"))
+		b.WriteString(DimStyle.Render("n/esc back to composer"))
 		return b.String()
 	}
-	b.WriteString(DimStyle.Render("y/enter confirm • n back to review • esc menu"))
+	b.WriteString(DimStyle.Render("y/enter confirm • n/esc back to composer"))
 	return b.String()
 }
 

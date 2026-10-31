@@ -73,7 +73,7 @@ func (m *PlannerModel) closeTagging() {
 		t.Products = copySet(m.selectedProducts)
 		t.HasTags = true
 		m.tagTarget = -1
-		m.step = plannerStepReview
+		m.step = plannerStepComposer
 		return
 	}
 	m.batchEntities = copySet(m.selectedEntities)
@@ -85,7 +85,7 @@ func (m *PlannerModel) closeTagging() {
 func (m *PlannerModel) cancelTagging() {
 	m.tagTarget = -1
 	m.taggingLoading = false
-	m.step = plannerStepReview
+	m.step = plannerStepComposer
 }
 
 // needsBatchTags reports whether any unsent task falls back to the batch

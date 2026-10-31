@@ -8,7 +8,7 @@ It is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), talks
 
 - Bind your Asana account and choose a default workspace and project.
 - Review task hours for an ISO week or a custom date range.
-- Build a local task list and submit tasks and subtasks into Asana.
+- Compose, tag and submit tasks and subtasks into Asana from one table view.
 - Generate structured week plans with OpenRouter and submit them to Asana.
 - Move one or more tasks from a weekly task picker into another project and optional section.
 
@@ -59,11 +59,12 @@ The app then writes config to `~/.config/lazy-asana/config.json`.
 - Sums the detected numeric hours field across returned tasks.
 - Filters to your user when `user_gid` is available from the bind flow.
 
-### Plan Day/Week
+### Task Composer
 
-- Maintains a local list of tasks and subtasks before submission.
-- Submits tasks into the default project and creates subtasks under each parent task.
-- Can ask OpenRouter for a structured week plan and parse the returned JSON into tasks.
+- One table view to add, edit, tag and delete tasks and subtasks before submission, with hours per day and a detail panel.
+- Per-task Company/Entity and Product/Project tags, with a batch default for untagged tasks.
+- Submits into the default project, places each task in its month section, and never duplicates a task on resubmit.
+- Can ask the LLM for a structured week plan and parse the returned JSON into tasks.
 
 ### Move Tasks
 

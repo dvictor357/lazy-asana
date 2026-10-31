@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,6 +15,10 @@ type llmDescResult struct {
 }
 
 func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ws, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = ws.Width
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -25,10 +30,10 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.step == plannerStepTagging {
 				break // the tag picker returns to Review itself
 			}
-			if m.step == plannerStepMenu {
+			if m.step == plannerStepComposer {
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 			}
-			m.step = plannerStepMenu
+			m.step = plannerStepComposer
 			return m, nil
 		}
 	}
@@ -47,12 +52,10 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.step {
-	case plannerStepMenu:
-		return m.updateMenu(msg)
+	case plannerStepComposer:
+		return m.updateComposer(msg)
 	case plannerStepAddTask, plannerStepAddSubtask:
 		return m.updateAddTask(msg)
-	case plannerStepReview:
-		return m.updateReview(msg)
 	case plannerStepTagging:
 		return m.updateTagging(msg)
 	case plannerStepConfirm, plannerStepSubmitting:
@@ -66,7 +69,9 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
+// updateComposer handles the Task Composer table: one screen to add, edit,
+// tag, delete and submit tasks.
+func (m *PlannerModel) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return *m, nil
@@ -74,72 +79,113 @@ func (m *PlannerModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch k.String() {
 	case "up", "k", "ctrl+p":
-		if m.menuIdx > 0 {
-			m.menuIdx--
+		if m.reviewCursor > 0 {
+			m.reviewCursor--
 		}
 	case "down", "j", "ctrl+n":
-		if m.menuIdx < 3 {
-			m.menuIdx++
+		if m.reviewCursor < len(m.tasks)-1 {
+			m.reviewCursor++
 		}
-	case "enter":
-		switch m.menuIdx {
-		case 0:
-			m.step = plannerStepAddTask
-			m.fieldCursor = 0
-			m.titleInput.SetValue("")
-			m.descInput.SetValue("")
-			m.hoursInput.SetValue("")
-			m.dateInput.SetValue("")
-			m.descInput.Blur()
-			m.hoursInput.Blur()
-			m.dateInput.Blur()
-			m.titleInput.Focus()
-			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
-		case 1:
-			if len(m.tasks) == 0 {
-				return *m, nil
-			}
-			m.clampCursors()
-			m.step = plannerStepAddSubtask
-			m.subParent = m.cursor
-			m.fieldCursor = 0
-			m.titleInput.SetValue("")
-			m.descInput.SetValue("")
-			m.hoursInput.SetValue("")
-			m.dateInput.SetValue("")
-			m.descInput.Blur()
-			m.hoursInput.Blur()
-			m.dateInput.Blur()
-			m.titleInput.Focus()
-			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
-		case 2:
-			if m.llmCli == nil {
-				return *m, func() tea.Msg { return ErrorMsg{Message: "no LLM key configured"} }
-			}
-			m.step = plannerStepLLMPlan
-			m.llmContext.SetValue("")
-			m.llmContext.Blur()
-			m.llmStartDate.SetValue("")
-			m.llmStartDate.Focus()
-			m.llmFieldCursor = 0
-			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
-		case 3:
-			if len(m.tasks) == 0 {
-				return *m, nil
-			}
-			m.step = plannerStepReview
+	case "a":
+		m.openForm(plannerStepAddTask, -1)
+		return *m, clearError
+	case "s":
+		if len(m.tasks) == 0 {
 			return *m, nil
 		}
-	case "tab", "ctrl+f":
-		if len(m.tasks) > 0 {
-			m.cursor = (m.cursor + 1) % len(m.tasks)
+		if m.tasks[m.reviewCursor].GID != "" {
+			return *m, errorCmd("task is already in Asana; add subtasks there")
 		}
-	case "shift+tab", "ctrl+b":
-		if len(m.tasks) > 0 {
-			m.cursor = (m.cursor - 1 + len(m.tasks)) % len(m.tasks)
+		m.subParent = m.reviewCursor
+		m.openForm(plannerStepAddSubtask, -1)
+		return *m, clearError
+	case "e":
+		if len(m.tasks) == 0 {
+			return *m, nil
 		}
+		if m.tasks[m.reviewCursor].GID != "" {
+			return *m, errorCmd("task is already in Asana; edit it there")
+		}
+		m.openForm(plannerStepAddTask, m.reviewCursor)
+		return *m, clearError
+	case "L":
+		if m.llmCli == nil {
+			return *m, errorCmd("no LLM key configured")
+		}
+		m.step = plannerStepLLMPlan
+		m.llmContext.SetValue("")
+		m.llmContext.Blur()
+		m.llmStartDate.SetValue("")
+		m.llmStartDate.Focus()
+		m.llmFieldCursor = 0
+		m.llmGenerating = false
+		return *m, clearError
+	case "d", "delete":
+		if len(m.tasks) > 0 {
+			m.tasks = append(m.tasks[:m.reviewCursor], m.tasks[m.reviewCursor+1:]...)
+			m.clampCursors()
+		}
+	case "t":
+		if len(m.tasks) == 0 || !m.hasTagFields() {
+			return *m, nil
+		}
+		if m.tasks[m.reviewCursor].submitted() {
+			return *m, errorCmd("task is already in Asana; change its tags there")
+		}
+		return *m, tea.Batch(m.openTagging(m.reviewCursor), m.spinner.Tick)
+	case "u":
+		if len(m.tasks) > 0 && !m.tasks[m.reviewCursor].submitted() {
+			t := &m.tasks[m.reviewCursor]
+			t.HasTags, t.Entities, t.Products = false, nil, nil
+		}
+	case "enter":
+		if len(m.tasks) == 0 {
+			return *m, nil
+		}
+		// Load the default project's sections now, so confirm can show and
+		// verify each task's month column before anything is sent.
+		m.sections = nil
+		m.sectionsErr = ""
+		m.sectionsLoaded = false
+		// Ask for the batch default only when some task has no tags of its own.
+		if m.hasTagFields() && m.needsBatchTags() {
+			return *m, tea.Batch(m.openTagging(-1), m.fetchSections(), m.spinner.Tick)
+		}
+		m.step = plannerStepConfirm
+		return *m, tea.Batch(m.fetchSections(), m.spinner.Tick)
 	}
 	return *m, nil
+}
+
+// openForm shows the task form, empty for a new task (editIdx -1) or filled
+// with the task being edited.
+func (m *PlannerModel) openForm(st plannerStep, editIdx int) {
+	m.step = st
+	m.editIdx = editIdx
+	m.fieldCursor = 0
+	m.titleInput.SetValue("")
+	m.descInput.SetValue("")
+	m.hoursInput.SetValue("")
+	m.dateInput.SetValue("")
+	if editIdx >= 0 && editIdx < len(m.tasks) {
+		t := m.tasks[editIdx]
+		m.titleInput.SetValue(t.Title)
+		m.descInput.SetValue(t.Description)
+		if t.Hours > 0 {
+			m.hoursInput.SetValue(strconv.FormatFloat(t.Hours, 'f', -1, 64))
+		}
+		m.dateInput.SetValue(t.DueDate)
+	}
+	m.descInput.Blur()
+	m.hoursInput.Blur()
+	m.dateInput.Blur()
+	m.titleInput.Focus()
+}
+
+func clearError() tea.Msg { return ErrorMsg{Message: ""} }
+
+func errorCmd(text string) tea.Cmd {
+	return func() tea.Msg { return ErrorMsg{Message: text} }
 }
 
 func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -259,72 +305,31 @@ func (m *PlannerModel) handleSaveTask() tea.Cmd {
 		DueDate:     m.dateInput.Value(),
 	}
 
+	if m.step == plannerStepAddTask && m.editIdx >= 0 {
+		if m.editIdx >= len(m.tasks) {
+			m.step = plannerStepComposer
+			return errorCmd("task no longer exists — edit not saved")
+		}
+		t := &m.tasks[m.editIdx]
+		t.Title, t.Description, t.Hours, t.DueDate = task.Title, task.Description, task.Hours, task.DueDate
+		m.editIdx = -1
+		m.step = plannerStepComposer
+		return nil
+	}
+
 	if m.step == plannerStepAddSubtask {
 		if m.subParent < 0 || m.subParent >= len(m.tasks) {
-			m.step = plannerStepMenu
+			m.step = plannerStepComposer
 			return func() tea.Msg { return ErrorMsg{Message: "parent task no longer exists — subtask not added"} }
 		}
 		m.tasks[m.subParent].Subtasks = append(m.tasks[m.subParent].Subtasks, task)
 	} else {
 		m.tasks = append(m.tasks, task)
+		m.reviewCursor = len(m.tasks) - 1
 	}
 
-	m.step = plannerStepMenu
+	m.step = plannerStepComposer
 	return nil
-}
-
-func (m *PlannerModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
-	k, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return *m, nil
-	}
-
-	switch k.String() {
-	case "up", "k", "ctrl+p":
-		if m.reviewCursor > 0 {
-			m.reviewCursor--
-		}
-	case "down", "j", "ctrl+n":
-		if m.reviewCursor < len(m.tasks)-1 {
-			m.reviewCursor++
-		}
-	case "d", "delete":
-		if len(m.tasks) > 0 {
-			m.tasks = append(m.tasks[:m.reviewCursor], m.tasks[m.reviewCursor+1:]...)
-			m.clampCursors()
-			if len(m.tasks) == 0 {
-				m.step = plannerStepMenu
-			}
-		}
-	case "enter":
-		if len(m.tasks) > 0 {
-			// Load the default project's sections now, so confirm can show and
-			// verify each task's month column before anything is sent.
-			m.sections = nil
-			m.sectionsErr = ""
-			m.sectionsLoaded = false
-			// Ask for the batch default only when some task has no tags of its own.
-			if m.hasTagFields() && m.needsBatchTags() {
-				return *m, tea.Batch(m.openTagging(-1), m.fetchSections(), m.spinner.Tick)
-			}
-			m.step = plannerStepConfirm
-			return *m, tea.Batch(m.fetchSections(), m.spinner.Tick)
-		}
-	case "t":
-		if len(m.tasks) == 0 || !m.hasTagFields() {
-			return *m, nil
-		}
-		if m.tasks[m.reviewCursor].submitted() {
-			return *m, func() tea.Msg { return ErrorMsg{Message: "task is already in Asana; change its tags there"} }
-		}
-		return *m, tea.Batch(m.openTagging(m.reviewCursor), m.spinner.Tick)
-	case "u":
-		if len(m.tasks) > 0 && !m.tasks[m.reviewCursor].submitted() {
-			t := &m.tasks[m.reviewCursor]
-			t.HasTags, t.Entities, t.Products = false, nil, nil
-		}
-	}
-	return *m, nil
 }
 
 func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -335,7 +340,7 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applySubmitResult(t)
 			m.submitIdx = t.idx
 			if t.err != "" {
-				m.step = plannerStepReview
+				m.step = plannerStepComposer
 				msg := t.err + " — tasks already in Asana are marked ✓ and skipped on resubmit"
 				return *m, func() tea.Msg { return ErrorMsg{Message: msg} }
 			}
@@ -372,7 +377,7 @@ func (m *PlannerModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.step = plannerStepSubmitting
 		return *m, tea.Batch(m.submitNext(0), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 	case "n":
-		m.step = plannerStepReview
+		m.step = plannerStepComposer
 	}
 	return *m, nil
 }
@@ -385,7 +390,7 @@ func (m *PlannerModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if k.String() == "enter" || k.String() == "esc" {
 		m.tasks = nil
 		m.clampCursors()
-		m.step = plannerStepMenu
+		m.step = plannerStepComposer
 	}
 	return *m, nil
 }
