@@ -28,6 +28,7 @@ type PlanTask struct {
 	Description string
 	Hours       float64
 	DueDate     string
+	Completed   bool // created in Asana already marked complete
 	Subtasks    []PlanTask
 
 	// Per-task Company/Entity and Product/Project choices (enum option GIDs).
@@ -69,6 +70,7 @@ type PlannerModel struct {
 	descInput  textarea.Model
 	hoursInput textinput.Model
 	dateInput  textinput.Model
+	formDone   bool // Completed toggle in the task form
 
 	llmGenerating  bool
 	llmResult      string
@@ -92,6 +94,8 @@ type PlannerModel struct {
 	batchProducts    map[string]bool
 	taggingSection   int // 0=entity, 1=product
 	taggingCursor    int
+	tagSearch        textinput.Model // "/" filter for the active tag field
+	tagSearching     bool
 	taggingLoading   bool
 	tagOptionsLoaded bool
 	tagTarget        int // task index being tagged from Review, or -1 for the batch default
@@ -147,6 +151,12 @@ func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
+	ts := textinput.New()
+	ts.Placeholder = "type to filter"
+	ts.Prompt = "/ "
+	ts.CharLimit = 60
+	ts.Width = 30
+
 	return PlannerModel{
 		cfg:          cfg,
 		asanaCli:     asanaCli,
@@ -159,6 +169,7 @@ func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.
 		llmContext:   lc,
 		llmStartDate: sd,
 		spinner:      sp,
+		tagSearch:    ts,
 		planDays:     5,
 		tagTarget:    -1,
 		editIdx:      -1,

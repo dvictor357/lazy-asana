@@ -32,29 +32,43 @@ Project selection supports:
 - `up` / `k` and `down` / `j` to move through the filtered list
 - `enter` to confirm the default project
 
-## Show Week Hours
+## Insights
 
-Main menu label: `Show Week Hours`
+Main menu label: `Insights` (first item)
 
 What it does:
 
-- fetches tasks from the default project
-- supports either an ISO week number or a custom start and end date
-- totals the detected hours custom field
-- shows memberships and assignee details for each result
+- week view: hours per day (Mon–Sun) against 8h, the week total against
+  40h, and the week's tasks
+- month view: hours per week of the month, with total, average and best week
+- data comes from tasks in the default project with a due date in the
+  period, filtered to your user when `user_gid` is saved
 
-Important behavior:
+Keys:
 
-- the query is scoped to the saved default project
-- if `user_gid` is saved, results are filtered to your Asana user
-- tasks without a due date are excluded because the flow depends on Asana due-date search filters
+| Key | Action |
+| --- | --- |
+| `←` / `→` | Previous / next week (or month) |
+| `↑`/`k`, `↓`/`j` | Move through tasks (week) or weeks (month) |
+| `w` / `m` | Week / month view |
+| `enter` | Month view: open the selected week |
+| `space` | Week view: pick or unpick the task for moving |
+| `a` | Week view: pick or clear all tasks |
+| `M` | Week view: move the picked tasks (or the highlighted one) to a project |
+| `r` | Refresh |
+| `esc` | Back to the main menu |
 
-Input flow:
+### Move Tasks
 
-- `tab` switches between week mode and date-range mode
-- in date-range mode, `tab` also switches between start and end date fields
-- `enter` fetches tasks
-- `esc` goes back
+Started with `M` from the Insights week view.
+
+- target project picker: type to search, `↑`/`↓` to move, `enter` to pick
+- section picker: preselects the section named after the first task's
+  due-date month; `No section (default)` keeps Asana's default placement
+- source project picker: optionally remove the tasks from one project they
+  belong to
+- `esc` on the project picker, and `enter`/`esc` when done, return to
+  Insights on the same week; after a move the week reloads
 
 ## Task Composer
 
@@ -81,6 +95,7 @@ Keys:
 | `a` | Add task |
 | `e` | Edit selected task (not once it is in Asana) |
 | `s` | Add subtask to selected task |
+| `c` | Toggle completed on the selected task (not once it is in Asana) |
 | `d` | Delete selected task from the local list |
 | `t` | Set tags for the selected task |
 | `u` | Return the selected task to the batch default tags |
@@ -90,7 +105,9 @@ Keys:
 
 ### Task Form
 
-- collects title, description, actual hours and due date (`YYYY-MM-DD`)
+- collects title, description, actual hours, due date (`YYYY-MM-DD`) and a
+  Status toggle: tasks are created not completed unless you tick
+  `[x] Completed` (`space` on the Status field)
 - `tab`/`shift+tab` switch fields, `enter` saves (`ctrl+s` inside the
   description), `ctrl+g` drafts a description with the LLM, `esc` cancels
 - editing keeps the task's subtasks and tags
@@ -123,6 +140,7 @@ Submission behavior:
 Tags (Company/Entity and Product/Project):
 
 - in the composer, `t` sets tags for the selected task and `u` returns it to the batch default
+- in the tag picker, `/` filters the active field's options (every word must match, case-insensitive); `enter` keeps the filter and returns to `j`/`k`/`space`, `esc` clears it
 - on submit, the default-tag picker appears only if some task has no tags of its own
 - single-select (`enum`) fields keep one option; picking another replaces it. `multi_enum` fields accept several
 - the composer table and Confirm show each task's tags; one task can carry only one value per `enum` field, so work spanning two products needs two tasks
@@ -139,47 +157,6 @@ Failures and resubmits:
 - submitting again skips what Asana already has, so nothing is created twice
 - `enter` and `esc` are ignored while a submit is running
 
-## Move Tasks
+## Chat with AI
 
-Main menu label: `Move Tasks`
-
-What it does:
-
-- loads tasks for a selected week
-- lets you select one or many tasks
-- lets you pick a target project
-- lets you pick an optional target section
-- lets you pick an optional source project to remove tasks from
-
-Task selection screen:
-
-- `space` toggles the current task
-- `a` selects or clears all tasks
-- `enter` continues with either the checked tasks or the single task under the cursor
-
-Target project picker:
-
-- type to search
-- `up` / `k` and `down` / `j` navigate the filtered list
-- `enter` confirms the target project
-
-Section picker:
-
-- the app tries to preselect a section whose name matches the first selected task's due-date month
-- `No section (default)` keeps Asana's default placement behavior
-
-Source project picker:
-
-- choose a source project if you want the task removed from one existing project membership
-- choose `Skip (just add, don't remove from any project)` if you want to keep the existing project memberships untouched
-
-Execution behavior:
-
-- the app first adds the task to the target project
-- if a source project is selected and the task is actually in that project, it then removes that membership
-
-Like the hours flow, tasks without due dates are not included in the weekly fetch.
-
-## Unexposed Chat Screen
-
-There is a `chat.go` implementation in the codebase, but the main menu does not currently route into it. It is not documented as a supported user workflow yet.
+Main menu label: `Chat with AI` (needs an OpenRouter or DeepSeek key). A plain chat with the configured LLM; it does not read or change Asana data.

@@ -76,19 +76,17 @@ This repository is small and centered around a single Bubble Tea application.
 The app is organized as several screen-specific Bubble Tea models:
 
 - `screenBind`
-- `screenHours`
 - `screenPlanner`
 - `screenChat`
 - `screenMigrate`
 
 The menu currently exposes:
 
-- `Bind Account`
-- `Show Week Hours`
+- `Insights` (Move Tasks opens from its week view via `MoveTasksMsg` and
+  returns with `BackToInsightsMsg`)
 - `Task Composer`
-- `Move Tasks`
-
-`screenChat` exists in the app router but does not currently have a menu entry.
+- `Chat with AI`
+- `Bind Account`
 
 ## Important Behavior
 

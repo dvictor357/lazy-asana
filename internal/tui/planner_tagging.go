@@ -43,7 +43,7 @@ func (m *PlannerModel) openTagging(target int) tea.Cmd {
 	m.tagTarget = target
 	m.step = plannerStepTagging
 	m.taggingSection = 0
-	m.taggingCursor = 0
+	m.clearTagSearch()
 	if target >= 0 {
 		t := m.tasks[target]
 		if t.HasTags {
@@ -174,10 +174,43 @@ func (m *PlannerModel) updateTagging(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	currentOptions := m.currentTagOptions()
 
+	// While the filter has focus, keys type into it; only arrows, enter and
+	// esc keep their meaning.
+	if m.tagSearching {
+		switch k.String() {
+		case "up", "ctrl+p":
+			if m.taggingCursor > 0 {
+				m.taggingCursor--
+			}
+		case "down", "ctrl+n":
+			if m.taggingCursor < len(currentOptions)-1 {
+				m.taggingCursor++
+			}
+		case "enter":
+			m.tagSearching = false // keep the filter, back to j/k/space
+			m.tagSearch.Blur()
+		case "esc":
+			m.clearTagSearch()
+		default:
+			prev := m.tagSearch.Value()
+			var cmd tea.Cmd
+			m.tagSearch, cmd = m.tagSearch.Update(msg)
+			if m.tagSearch.Value() != prev {
+				m.taggingCursor = 0
+			}
+			return *m, cmd
+		}
+		return *m, nil
+	}
+
 	switch k.String() {
+	case "/":
+		m.tagSearching = true
+		return *m, m.tagSearch.Focus()
+
 	case "tab", "shift+tab", "ctrl+f", "ctrl+b":
 		m.taggingSection = 1 - m.taggingSection
-		m.taggingCursor = 0
+		m.clearTagSearch()
 
 	case "up", "k", "ctrl+p":
 		if m.taggingCursor > 0 {
@@ -198,17 +231,53 @@ func (m *PlannerModel) updateTagging(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closeTagging()
 
 	case "esc":
-		m.cancelTagging()
+		if m.tagSearch.Value() != "" {
+			m.clearTagSearch() // first esc drops the filter
+		} else {
+			m.cancelTagging()
+		}
 	}
 
 	return *m, nil
 }
 
+func (m *PlannerModel) clearTagSearch() {
+	m.tagSearching = false
+	m.tagSearch.SetValue("")
+	m.tagSearch.Blur()
+	m.taggingCursor = 0
+}
+
+// currentTagOptions returns the active field's options that match the
+// filter: every word of the query must appear in the name, case-insensitive.
 func (m *PlannerModel) currentTagOptions() []asana.EnumOption {
+	opts := m.entityOptions
 	if m.taggingSection == 1 {
-		return m.productOptions
+		opts = m.productOptions
 	}
-	return m.entityOptions
+	return filterOptions(opts, m.tagSearch.Value())
+}
+
+func filterOptions(opts []asana.EnumOption, query string) []asana.EnumOption {
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 {
+		return opts
+	}
+	var out []asana.EnumOption
+	for _, o := range opts {
+		name := strings.ToLower(o.Name)
+		match := true
+		for _, w := range words {
+			if !strings.Contains(name, w) {
+				match = false
+				break
+			}
+		}
+		if match {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 // toggleTag flips an option. Single-select ("enum") fields keep at most one

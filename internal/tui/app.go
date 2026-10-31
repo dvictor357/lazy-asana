@@ -13,7 +13,6 @@ type screen int
 const (
 	screenMenu screen = iota
 	screenBind
-	screenHours
 	screenPlanner
 	screenChat
 	screenMigrate
@@ -27,7 +26,6 @@ type App struct {
 	screen   screen
 	menu     MenuModel
 	bind     BindModel
-	hours    HoursModel
 	planner  PlannerModel
 	chat     ChatModel
 	migrate  MigrateModel
@@ -57,7 +55,6 @@ func NewApp(cfg *config.Config) *App {
 		app.screen = screenBind
 		app.bind = NewBindModel(cfg)
 	} else {
-		app.hours = NewHoursModel(cfg, ac)
 		app.planner = NewPlannerModel(cfg, ac, lc)
 		app.insights = NewInsightsModel(cfg, ac)
 		if lc != nil {
@@ -88,8 +85,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Screen {
 		case screenBind:
 			a.bind = NewBindModel(a.cfg)
-		case screenHours:
-			a.hours = NewHoursModel(a.cfg, a.asana)
 		case screenPlanner:
 			a.planner = NewPlannerModel(a.cfg, a.asana, a.llm)
 			a.planner.width = a.width
@@ -102,8 +97,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case screenMenu:
 			a.menu = NewMenu(a.cfg.IsBound(), a.llm != nil)
-		case screenMigrate:
-			a.migrate = NewMigrateModel(a.cfg, a.asana)
 		case screenInsights:
 			a.insights = NewInsightsModel(a.cfg, a.asana)
 			return a, tea.Batch(a.insights.Init())
@@ -112,11 +105,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrorMsg:
 		a.err = msg.Message
 		return a, nil
+	case MoveTasksMsg:
+		a.migrate = NewMigrateForTasks(a.cfg, a.asana, msg.Tasks)
+		a.migrate.width = a.width
+		a.screen = screenMigrate
+		a.err = ""
+		return a, a.migrate.Init()
+	case BackToInsightsMsg:
+		a.screen = screenInsights
+		a.err = msg.Err
+		if msg.Refresh {
+			var cmd tea.Cmd
+			a.insights, cmd = a.insights.reload()
+			return a, cmd
+		}
+		return a, nil
 	case BindCompleteMsg:
 		a.cfg = msg.Config
 		a.asana = asana.NewClient(a.cfg.AsanaToken)
 		a.llm = newLLMClient(a.cfg)
-		a.hours = NewHoursModel(a.cfg, a.asana)
 		a.planner = NewPlannerModel(a.cfg, a.asana, a.llm)
 		a.insights = NewInsightsModel(a.cfg, a.asana)
 		a.chat = NewChatModel(a.llm)
@@ -134,10 +141,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenBind:
 		m, c := a.bind.Update(msg)
 		a.bind = m.(BindModel)
-		cmd = c
-	case screenHours:
-		m, c := a.hours.Update(msg)
-		a.hours = m.(HoursModel)
 		cmd = c
 	case screenPlanner:
 		m, c := a.planner.Update(msg)
@@ -166,8 +169,6 @@ func (a *App) View() string {
 		content = a.menu.View()
 	case screenBind:
 		content = a.bind.View()
-	case screenHours:
-		content = a.hours.View()
 	case screenPlanner:
 		content = a.planner.View()
 	case screenChat:
@@ -190,6 +191,18 @@ type ScreenMsg struct {
 
 type ErrorMsg struct {
 	Message string
+}
+
+// MoveTasksMsg opens Move Tasks for tasks picked in Insights.
+type MoveTasksMsg struct {
+	Tasks []asana.Task
+}
+
+// BackToInsightsMsg returns from Move Tasks to Insights, keeping the week
+// that was open; Refresh reloads it.
+type BackToInsightsMsg struct {
+	Refresh bool
+	Err     string
 }
 
 type BindCompleteMsg struct {

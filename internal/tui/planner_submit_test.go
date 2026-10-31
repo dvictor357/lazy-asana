@@ -22,6 +22,7 @@ type fakeAsana struct {
 	created                         []string // task names created
 	placed                          map[string]string
 	fields                          map[string]map[string]interface{} // custom_fields per created task
+	inputs                          map[string]map[string]interface{} // full create payload per name
 }
 
 func (f *fakeAsana) CreateTask(in map[string]interface{}) (*asana.Task, error) {
@@ -31,6 +32,7 @@ func (f *fakeAsana) CreateTask(in map[string]interface{}) (*asana.Task, error) {
 	}
 	name := in["name"].(string)
 	f.created = append(f.created, name)
+	f.record(name, in)
 	if cf, ok := in["custom_fields"].(map[string]interface{}); ok {
 		if f.fields == nil {
 			f.fields = map[string]map[string]interface{}{}
@@ -38,6 +40,13 @@ func (f *fakeAsana) CreateTask(in map[string]interface{}) (*asana.Task, error) {
 		f.fields[name] = cf
 	}
 	return &asana.Task{GID: "gid-" + name}, nil
+}
+
+func (f *fakeAsana) record(name string, in map[string]interface{}) {
+	if f.inputs == nil {
+		f.inputs = map[string]map[string]interface{}{}
+	}
+	f.inputs[name] = in
 }
 
 func (f *fakeAsana) GetCustomFieldSettings(string) ([]asana.CustomFieldSetting, error) {
@@ -54,6 +63,7 @@ func (f *fakeAsana) CreateSubtask(parent string, in map[string]interface{}) (*as
 	}
 	name := in["name"].(string)
 	f.created = append(f.created, name)
+	f.record(name, in)
 	return &asana.Task{GID: "gid-" + name}, nil
 }
 
@@ -474,4 +484,133 @@ func TestClearTaskTags(t *testing.T) {
 		t.Fatal("u should drop the task's own tags")
 	}
 	_ = m.View()
+}
+
+func TestCompletedToggleInFormIsSubmitted(t *testing.T) {
+	f := &fakeAsana{sections: monthSections}
+	m := newPlanner(f)
+	m = step(t, m, keyMsg("a"))
+	m.titleInput.SetValue("done task")
+	m.dateInput.SetValue("2026-10-19")
+	for i := 0; i < formFieldDone; i++ {
+		m = step(t, m, keyMsg("tab"))
+	}
+	m = step(t, m, keyMsg(" "))
+	if !m.formDone {
+		t.Fatal("space on the Status field should toggle completed")
+	}
+	m = step(t, m, keyMsg("enter"))
+	if !m.tasks[0].Completed {
+		t.Fatal("saved task is not completed")
+	}
+	m = step(t, m, keyMsg("enter")) // confirm
+	m = step(t, m, keyMsg("enter")) // submit
+	if got := f.inputs["done task"]["completed"]; got != true {
+		t.Fatalf("CreateTask completed = %v, want true", got)
+	}
+}
+
+func TestCompletedDefaultsToFalse(t *testing.T) {
+	f := &fakeAsana{sections: monthSections}
+	m := newPlanner(f, PlanTask{Title: "open", DueDate: "2026-10-19", Subtasks: []PlanTask{{Title: "sub"}}})
+	m = submitFromReview(t, m)
+	if f.inputs["open"]["completed"] != false || f.inputs["sub"]["completed"] != false {
+		t.Fatalf("completed = %v / %v, want false for task and subtask", f.inputs["open"]["completed"], f.inputs["sub"]["completed"])
+	}
+}
+
+func TestComposerCTogglesCompleted(t *testing.T) {
+	m := newPlanner(&fakeAsana{}, PlanTask{Title: "a"}, PlanTask{Title: "b", GID: "g", Placed: true})
+	m = step(t, m, keyMsg("c"))
+	if !m.tasks[0].Completed {
+		t.Fatal("c should mark the selected task completed")
+	}
+	m = step(t, m, keyMsg("c"))
+	if m.tasks[0].Completed {
+		t.Fatal("c again should clear it")
+	}
+	m = step(t, m, keyMsg("j"))
+	m = step(t, m, keyMsg("c"))
+	if m.tasks[1].Completed {
+		t.Fatal("a task already in Asana must not change locally")
+	}
+	_ = m.View()
+}
+
+func TestEditPrefillsCompleted(t *testing.T) {
+	m := newPlanner(&fakeAsana{}, PlanTask{Title: "a", Completed: true})
+	m = step(t, m, keyMsg("e"))
+	if !m.formDone {
+		t.Fatal("edit form should show the task as completed")
+	}
+	m = step(t, m, keyMsg("a"))
+	_ = m
+}
+
+func typeText(t *testing.T, m PlannerModel, text string) PlannerModel {
+	t.Helper()
+	for _, r := range text {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return m
+}
+
+func TestTagSearchFiltersAndSelects(t *testing.T) {
+	m := newTaggedPlanner(&fakeAsana{}, "enum", PlanTask{Title: "a"})
+	m = step(t, m, keyMsg("t"))
+	m = step(t, m, keyMsg("tab")) // Product/Project
+	m = step(t, m, keyMsg("/"))
+	m = typeText(t, m, "a2p j") // j is typed, not a move
+	if got := m.tagSearch.Value(); got != "a2p j" {
+		t.Fatalf("filter = %q, want %q", got, "a2p j")
+	}
+	if n := len(m.currentTagOptions()); n != 0 {
+		t.Fatalf("%d matches for %q, want 0", n, "a2p j")
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	opts := m.currentTagOptions()
+	if len(opts) != 1 || opts[0].GID != "p-a2p" {
+		t.Fatalf("filter %q matched %v, want only elfo A2P", m.tagSearch.Value(), opts)
+	}
+	m = step(t, m, keyMsg("enter")) // leave filter mode, keep filter
+	m = step(t, m, keyMsg(" "))
+	if !m.selectedProducts["p-a2p"] {
+		t.Fatalf("selected %v, want p-a2p", m.selectedProducts)
+	}
+	m = step(t, m, keyMsg("esc")) // clears filter
+	if m.tagSearch.Value() != "" || m.step != plannerStepTagging {
+		t.Fatalf("first esc: filter=%q step=%v, want cleared filter, still tagging", m.tagSearch.Value(), m.step)
+	}
+	_ = m.View()
+	m = step(t, m, keyMsg("enter"))
+	if !m.tasks[0].Products["p-a2p"] {
+		t.Fatal("tag picked through the filter was not saved")
+	}
+}
+
+func TestTagSearchResetsOnFieldSwitch(t *testing.T) {
+	m := newTaggedPlanner(&fakeAsana{}, "enum", PlanTask{Title: "a"})
+	m = step(t, m, keyMsg("t"))
+	m = step(t, m, keyMsg("/"))
+	m = typeText(t, m, "elfo")
+	m = step(t, m, keyMsg("enter"))
+	m = step(t, m, keyMsg("tab"))
+	if m.tagSearch.Value() != "" || len(m.currentTagOptions()) != 2 {
+		t.Fatalf("after tab: filter=%q options=%d, want empty filter and all options", m.tagSearch.Value(), len(m.currentTagOptions()))
+	}
+}
+
+func TestFilterOptionsMatchesAllWords(t *testing.T) {
+	opts := []asana.EnumOption{{GID: "1", Name: "elfo A2P"}, {GID: "2", Name: "elfo Omnichannel"}, {GID: "3", Name: "Kopi Kenangan"}}
+	cases := map[string]string{"": "[1 2 3]", "ELFO": "[1 2]", "a2p elfo": "[1]", "omni ch": "[2]", "nope": "[]"}
+	for q, want := range cases {
+		var got []string
+		for _, o := range filterOptions(opts, q) {
+			got = append(got, o.GID)
+		}
+		if g := fmt.Sprint(got); g != want && !(want == "[]" && len(got) == 0) {
+			t.Errorf("filterOptions(%q) = %s, want %s", q, g, want)
+		}
+	}
 }

@@ -124,7 +124,7 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 				"notes":     task.Description,
 				"projects":  []string{projGID},
 				"workspace": wsGID,
-				"completed": false,
+				"completed": task.Completed,
 			}
 			if userGID != "" {
 				input["assignee"] = userGID
@@ -166,8 +166,9 @@ func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 				continue
 			}
 			subInput := map[string]interface{}{
-				"name":  sub.Title,
-				"notes": sub.Description,
+				"name":      sub.Title,
+				"notes":     sub.Description,
+				"completed": sub.Completed,
 			}
 			if sub.DueDate != "" {
 				subInput["due_on"] = sub.DueDate

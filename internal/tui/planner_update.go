@@ -120,6 +120,14 @@ func (m *PlannerModel) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.llmFieldCursor = 0
 		m.llmGenerating = false
 		return *m, clearError
+	case "c":
+		if len(m.tasks) == 0 {
+			return *m, nil
+		}
+		if m.tasks[m.reviewCursor].GID != "" {
+			return *m, errorCmd("task is already in Asana; complete it there")
+		}
+		m.tasks[m.reviewCursor].Completed = !m.tasks[m.reviewCursor].Completed
 	case "d", "delete":
 		if len(m.tasks) > 0 {
 			m.tasks = append(m.tasks[:m.reviewCursor], m.tasks[m.reviewCursor+1:]...)
@@ -167,6 +175,7 @@ func (m *PlannerModel) openForm(st plannerStep, editIdx int) {
 	m.descInput.SetValue("")
 	m.hoursInput.SetValue("")
 	m.dateInput.SetValue("")
+	m.formDone = false
 	if editIdx >= 0 && editIdx < len(m.tasks) {
 		t := m.tasks[editIdx]
 		m.titleInput.SetValue(t.Title)
@@ -175,6 +184,7 @@ func (m *PlannerModel) openForm(st plannerStep, editIdx int) {
 			m.hoursInput.SetValue(strconv.FormatFloat(t.Hours, 'f', -1, 64))
 		}
 		m.dateInput.SetValue(t.DueDate)
+		m.formDone = t.Completed
 	}
 	m.descInput.Blur()
 	m.hoursInput.Blur()
@@ -218,6 +228,11 @@ func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return *m, cmd
 	case "ctrl+s":
 		return *m, m.handleSaveTask()
+	case " ", "x":
+		if m.fieldCursor == formFieldDone {
+			m.formDone = !m.formDone
+			return *m, nil
+		}
 	case "enter":
 		if m.fieldCursor == 1 {
 			// description textarea: pass enter through for newline
@@ -231,12 +246,18 @@ func (m *PlannerModel) updateAddTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.updateFocusedField(msg)
 }
 
+// Task form fields: title, description, hours, due date, completed.
+const (
+	formFieldDone = 4
+	formFields    = 5
+)
+
 func (m *PlannerModel) cycleField(dir int) {
 	m.titleInput.Blur()
 	m.descInput.Blur()
 	m.hoursInput.Blur()
 	m.dateInput.Blur()
-	m.fieldCursor = ((m.fieldCursor+dir)%4 + 4) % 4
+	m.fieldCursor = ((m.fieldCursor+dir)%formFields + formFields) % formFields
 	switch m.fieldCursor {
 	case 0:
 		m.titleInput.Focus()
@@ -303,6 +324,7 @@ func (m *PlannerModel) handleSaveTask() tea.Cmd {
 		Description: m.descInput.Value(),
 		Hours:       hours,
 		DueDate:     m.dateInput.Value(),
+		Completed:   m.formDone,
 	}
 
 	if m.step == plannerStepAddTask && m.editIdx >= 0 {
@@ -311,7 +333,7 @@ func (m *PlannerModel) handleSaveTask() tea.Cmd {
 			return errorCmd("task no longer exists — edit not saved")
 		}
 		t := &m.tasks[m.editIdx]
-		t.Title, t.Description, t.Hours, t.DueDate = task.Title, task.Description, task.Hours, task.DueDate
+		t.Title, t.Description, t.Hours, t.DueDate, t.Completed = task.Title, task.Description, task.Hours, task.DueDate, task.Completed
 		m.editIdx = -1
 		m.step = plannerStepComposer
 		return nil

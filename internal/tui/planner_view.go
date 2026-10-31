@@ -82,7 +82,19 @@ func (m PlannerModel) viewAddTask(header string) string {
 	b.WriteString(m.dateInput.View())
 	b.WriteString("\n\n")
 
+	b.WriteString(fieldLabel("Status", formFieldDone))
+	b.WriteString("\n")
+	if m.formDone {
+		b.WriteString(SuccessStyle.Render("  [x] Completed"))
+	} else {
+		b.WriteString(ValueStyle.Render("  [ ] Not completed yet"))
+	}
+	b.WriteString("\n\n")
+
 	hint := "tab/shift+tab switch fields • enter save"
+	if m.fieldCursor == formFieldDone {
+		hint = "space toggle completed • tab/shift+tab switch fields • enter save"
+	}
 	if m.fieldCursor == 1 {
 		hint = "tab/shift+tab switch fields • ctrl+s save • enter newline"
 	}
@@ -110,67 +122,85 @@ func (m PlannerModel) viewTagging() string {
 		return b.String()
 	}
 
-	const pageSize = 10
-	renderSection := func(label string, opts []asana.EnumOption, selected map[string]bool, active bool, cursor int) {
-		sectionStyle := LabelStyle
-		prefix := "  "
-		if active {
-			sectionStyle = HighlightStyle
-			prefix = "> "
-		}
-		b.WriteString(sectionStyle.Render(prefix + label))
-		b.WriteString("\n")
-		if len(opts) == 0 {
-			b.WriteString(DimStyle.Render("  (no options)"))
-			b.WriteString("\n")
-		} else {
-			start := cursor - pageSize/2
-			if start < 0 {
-				start = 0
-			}
-			end := start + pageSize
-			if end > len(opts) {
-				end = len(opts)
-				start = end - pageSize
-				if start < 0 {
-					start = 0
-				}
-			}
-			if start > 0 {
-				b.WriteString(DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)))
-				b.WriteString("\n")
-			}
-			for i := start; i < end; i++ {
-				opt := opts[i]
-				check := "[ ]"
-				if selected[opt.GID] {
-					check = "[x]"
-				}
-				style := ValueStyle
-				if active && i == cursor {
-					style = HighlightStyle
-				}
-				b.WriteString(style.Render(fmt.Sprintf("  %s %s", check, opt.Name)))
-				b.WriteString("\n")
-			}
-			if end < len(opts) {
-				b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", len(opts)-end)))
-				b.WriteString("\n")
-			}
-		}
-		b.WriteString("\n")
-	}
-
 	label := func(name, fieldType string) string {
 		if fieldType == "multi_enum" {
 			return name + " (pick any)"
 		}
 		return name + " (pick one)"
 	}
-	renderSection(label("Company/Entity", m.cfg.EntityFieldType), m.entityOptions, m.selectedEntities, m.taggingSection == 0, m.taggingCursor)
-	renderSection(label("Product/Project", m.cfg.ProductFieldType), m.productOptions, m.selectedProducts, m.taggingSection == 1, m.taggingCursor)
+	selectedNames := func(opts []asana.EnumOption, selected map[string]bool) string {
+		var names []string
+		for _, o := range opts {
+			if selected[o.GID] {
+				names = append(names, o.Name)
+			}
+		}
+		if len(names) == 0 {
+			return "none"
+		}
+		return strings.Join(names, ", ")
+	}
 
-	b.WriteString(DimStyle.Render("↑/k↓/j navigate • space select • tab switch field • enter save • esc back to composer"))
+	fields := []struct {
+		name     string
+		ftype    string
+		opts     []asana.EnumOption
+		selected map[string]bool
+	}{
+		{"Company/Entity", m.cfg.EntityFieldType, m.entityOptions, m.selectedEntities},
+		{"Product/Project", m.cfg.ProductFieldType, m.productOptions, m.selectedProducts},
+	}
+
+	for i, f := range fields {
+		if i != m.taggingSection {
+			// Inactive field: just its current choice, to keep the list short.
+			b.WriteString(LabelStyle.Render("  "+label(f.name, f.ftype)) + "  " +
+				ValueStyle.Render(selectedNames(f.opts, f.selected)) + "\n\n")
+			continue
+		}
+		b.WriteString(HighlightStyle.Render("> "+label(f.name, f.ftype)) + "  " +
+			DimStyle.Render("selected: ") + ValueStyle.Render(selectedNames(f.opts, f.selected)) + "\n")
+
+		shown := filterOptions(f.opts, m.tagSearch.Value())
+		if m.tagSearching || m.tagSearch.Value() != "" {
+			b.WriteString("  " + m.tagSearch.View() + DimStyle.Render(fmt.Sprintf("  %d of %d", len(shown), len(f.opts))) + "\n")
+		}
+
+		const pageSize = 10
+		switch {
+		case len(f.opts) == 0:
+			b.WriteString(DimStyle.Render("  (no options)") + "\n")
+		case len(shown) == 0:
+			b.WriteString(DimStyle.Render("  no match — esc clears the filter") + "\n")
+		default:
+			start, end := windowAround(m.taggingCursor, len(shown), pageSize)
+			if start > 0 {
+				b.WriteString(DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+			}
+			for j := start; j < end; j++ {
+				opt := shown[j]
+				check := "[ ]"
+				if f.selected[opt.GID] {
+					check = "[x]"
+				}
+				style := ValueStyle
+				if j == m.taggingCursor {
+					style = HighlightStyle
+				}
+				b.WriteString(style.Render(fmt.Sprintf("  %s %s", check, opt.Name)) + "\n")
+			}
+			if end < len(shown) {
+				b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", len(shown)-end)) + "\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	if m.tagSearching {
+		b.WriteString(DimStyle.Render("type to filter • ↑↓ move • enter done filtering • esc clear filter"))
+	} else {
+		b.WriteString(DimStyle.Render("/ search • ↑/k↓/j move • space select • tab switch field • enter save • esc back"))
+	}
 	return b.String()
 }
 

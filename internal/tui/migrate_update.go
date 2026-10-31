@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -29,25 +28,9 @@ func (m *MigrateModel) handleMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
-	case migrateTasksMsg:
-		if msg.err != nil {
-			m.step = migrateStepWeek
-			m.weekInput.Focus()
-			return *m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
-		}
-		m.tasks = msg.tasks
-		m.fetchedStart = msg.fetchedStart
-		m.fetchedEnd = msg.fetchedEnd
-		m.weekNum = msg.weekNum
-		m.taskCursor = 0
-		m.selected = make(map[int]bool)
-		m.step = migrateStepTasks
-		return *m, nil
-
 	case migrateProjsMsg:
 		if msg.err != nil {
-			m.step = migrateStepTasks
-			return *m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
+			return *m, backToInsights(false, "cannot load projects: "+msg.err.Error())
 		}
 		m.projects = msg.projects
 		m.projCursor = 0
@@ -99,111 +82,19 @@ func (m *MigrateModel) handleMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *MigrateModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.step {
 
-	// ── week input ────────────────────────────────────────────────────────────
-	case migrateStepWeek:
-		switch msg.String() {
-		case "esc":
-			return *m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
-		case "enter":
-			weekStr := m.weekInput.Value()
-			var weekNum int
-			if weekStr == "" {
-				weekNum = asana.CurrentWeek()
-			} else {
-				fmt.Sscanf(weekStr, "%d", &weekNum)
-			}
-			if err := asana.ValidateWeek(asana.CurrentYear(), weekNum); err != nil {
-				return *m, func() tea.Msg { return ErrorMsg{Message: fmt.Sprintf("invalid week: %s", err)} }
-			}
-			m.weekNum = weekNum
-			m.step = migrateStepFetching
-			m.weekInput.Blur()
-			return *m, tea.Batch(m.fetchTasks(weekNum), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
-		default:
-			var cmd tea.Cmd
-			m.weekInput, cmd = m.weekInput.Update(msg)
-			return *m, cmd
-		}
-
-	// ── task list ─────────────────────────────────────────────────────────────
-	case migrateStepTasks:
-		switch msg.String() {
-		case "esc":
-			m.step = migrateStepWeek
-			m.tasks = nil
-			m.selected = make(map[int]bool)
-			m.weekInput.Focus()
-			return *m, func() tea.Msg { return ErrorMsg{Message: ""} }
-		case "up", "k", "ctrl+p":
-			if m.taskCursor > 0 {
-				m.taskCursor--
-			}
-			return *m, nil
-		case "down", "j", "ctrl+n":
-			if m.taskCursor < len(m.tasks)-1 {
-				m.taskCursor++
-			}
-			return *m, nil
-		case " ":
-			// Toggle checkbox on current task
-			if m.selected[m.taskCursor] {
-				delete(m.selected, m.taskCursor)
-			} else {
-				m.selected[m.taskCursor] = true
-			}
-			return *m, nil
-		case "a":
-			// Select all / deselect all
-			if len(m.selected) == len(m.tasks) {
-				m.selected = make(map[int]bool)
-			} else {
-				for i := range m.tasks {
-					m.selected[i] = true
-				}
-			}
-			return *m, nil
-		case "enter":
-			if len(m.tasks) == 0 {
-				return *m, nil
-			}
-			// Build selectedTasks: checked ones, or just the cursor task
-			m.selectedTasks = nil
-			for i, t := range m.tasks {
-				if m.selected[i] {
-					m.selectedTasks = append(m.selectedTasks, t)
-				}
-			}
-			if len(m.selectedTasks) == 0 {
-				m.selectedTasks = []asana.Task{m.tasks[m.taskCursor]}
-			}
-			m.selectedTask = m.selectedTasks[0]
-			// Load projects (or reuse cache)
-			if m.projects != nil {
-				m.projCursor = 0
-				m.projSearch.SetValue("")
-				m.projSearch.Focus()
-				m.step = migrateStepPickTarget
-				return *m, nil
-			}
-			m.step = migrateStepLoadProjects
-			return *m, tea.Batch(m.fetchProjects(), m.spinner.Tick)
-		}
-		return *m, nil
-
 	// ── target project picker ─────────────────────────────────────────────────
 	case migrateStepPickTarget:
 		filtered := m.filteredProjects()
+		// The search box has focus here, so j/k are typed, not moves.
 		switch msg.String() {
 		case "esc":
-			m.step = migrateStepTasks
-			m.projSearch.Blur()
-			return *m, nil
-		case "up", "k", "ctrl+p":
+			return *m, backToInsights(false, "")
+		case "up", "ctrl+p":
 			if m.projCursor > 0 {
 				m.projCursor--
 			}
 			return *m, nil
-		case "down", "j", "ctrl+n":
+		case "down", "ctrl+n":
 			if m.projCursor < len(filtered)-1 {
 				m.projCursor++
 			}
@@ -296,15 +187,8 @@ func (m *MigrateModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── done ─────────────────────────────────────────────────────────────────
 	case migrateStepDone:
 		switch msg.String() {
-		case "r", "enter":
-			m.step = migrateStepFetching
-			m.moveMoved = 0
-			m.moveFailed = 0
-			m.moveErrors = nil
-			m.selected = make(map[int]bool)
-			return *m, tea.Batch(m.fetchTasks(m.weekNum), m.spinner.Tick)
-		case "esc", "q":
-			return *m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
+		case "enter", "esc", "q":
+			return *m, backToInsights(true, "")
 		}
 		return *m, nil
 	}

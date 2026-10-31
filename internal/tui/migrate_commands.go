@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,27 +9,6 @@ import (
 )
 
 // ── Commands ──────────────────────────────────────────────────────────────────
-
-func (m MigrateModel) fetchTasks(weekNum int) tea.Cmd {
-	wsGID := m.cfg.DefaultWorkspaceGID
-	userGID := m.cfg.UserGID
-	client := m.client
-	return func() tea.Msg {
-		dateStart, dateEnd := asana.WeekToDateRange(asana.CurrentYear(), weekNum)
-		filters := url.Values{
-			"due_on.after":  {shiftDate(dateStart, -1)},
-			"due_on.before": {shiftDate(dateEnd, 1)},
-		}
-		if userGID != "" {
-			filters["assignee.any"] = []string{userGID}
-		}
-		tasks, err := client.SearchTasks(wsGID, filters)
-		if err != nil {
-			return migrateTasksMsg{err: err}
-		}
-		return migrateTasksMsg{tasks: tasks, fetchedStart: dateStart, fetchedEnd: dateEnd, weekNum: weekNum}
-	}
-}
 
 func (m MigrateModel) fetchProjects() tea.Cmd {
 	wsGID := m.cfg.DefaultWorkspaceGID

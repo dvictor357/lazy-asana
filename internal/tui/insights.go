@@ -52,6 +52,7 @@ type InsightsModel struct {
 	total     float64
 	spinner   spinner.Model
 	width     int
+	selected  map[string]bool // task GIDs picked for Move Tasks (week view)
 }
 
 func NewInsightsModel(cfg *config.Config, client asana.AsanaClient) InsightsModel {
@@ -87,6 +88,7 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case insightsResult:
 		m.loading = false
 		m.firstLoad = false
+		m.selected = nil // the task list changed; old picks may be gone
 		if msg.err != nil {
 			return m, func() tea.Msg { return ErrorMsg{Message: msg.err.Error()} }
 		}
@@ -156,12 +158,69 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "r":
-			m.loading = true
-			return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+			return m.reload()
+
+		case " ":
+			if m.mode == insightModeWeek && m.cursor < len(m.tasks) {
+				gid := m.tasks[m.cursor].GID
+				if m.selected == nil {
+					m.selected = map[string]bool{}
+				}
+				if m.selected[gid] {
+					delete(m.selected, gid)
+				} else {
+					m.selected[gid] = true
+				}
+				if m.cursor < len(m.tasks)-1 {
+					m.cursor++
+				}
+			}
+			return m, nil
+
+		case "a":
+			if m.mode == insightModeWeek && len(m.tasks) > 0 {
+				if len(m.selected) == len(m.tasks) {
+					m.selected = nil
+				} else {
+					m.selected = map[string]bool{}
+					for _, t := range m.tasks {
+						m.selected[t.GID] = true
+					}
+				}
+			}
+			return m, nil
+
+		case "M":
+			if m.mode != insightModeWeek || m.loading || len(m.tasks) == 0 {
+				return m, nil
+			}
+			tasks := m.tasksToMove()
+			return m, func() tea.Msg { return MoveTasksMsg{Tasks: tasks} }
 		}
 	}
 
 	return m, nil
+}
+
+// reload fetches the current period again, keeping the week or month in view.
+func (m InsightsModel) reload() (InsightsModel, tea.Cmd) {
+	m.loading = true
+	m.selected = nil
+	return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
+}
+
+// tasksToMove returns the picked tasks, or the highlighted one when none are.
+func (m InsightsModel) tasksToMove() []asana.Task {
+	var out []asana.Task
+	for _, t := range m.tasks {
+		if m.selected[t.GID] {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 && m.cursor < len(m.tasks) {
+		out = []asana.Task{m.tasks[m.cursor]}
+	}
+	return out
 }
 
 func (m InsightsModel) navigate(dir int) (tea.Model, tea.Cmd) {
@@ -172,6 +231,7 @@ func (m InsightsModel) navigate(dir int) (tea.Model, tea.Cmd) {
 	}
 	m.loading = true
 	m.cursor = 0
+	m.selected = nil
 	return m, tea.Batch(m.fetchCmd(), m.spinner.Tick, func() tea.Msg { return ErrorMsg{Message: ""} })
 }
 
@@ -389,7 +449,11 @@ func (m InsightsModel) viewWeek() string {
 			}
 		}
 
-		b.WriteString(LabelStyle.Render(fmt.Sprintf("Tasks (%d):", total)))
+		header := fmt.Sprintf("Tasks (%d):", total)
+		if n := len(m.selected); n > 0 {
+			header += fmt.Sprintf("  %d selected", n)
+		}
+		b.WriteString(LabelStyle.Render(header))
 		b.WriteString("\n")
 
 		if start2 > 0 {
@@ -408,9 +472,13 @@ func (m InsightsModel) viewWeek() string {
 			if t.Completed {
 				status = SuccessStyle.Render("done")
 			}
+			check := DimStyle.Render("[ ]")
+			if m.selected[t.GID] {
+				check = SuccessStyle.Render("[x]")
+			}
 			name := padRight(t.Name, 45)
-			b.WriteString(fmt.Sprintf("%s%s  %s  %4.1fh  %s\n",
-				cur, style.Render(name), DimStyle.Render(t.DueOn), h, status))
+			b.WriteString(fmt.Sprintf("%s%s %s  %s  %4.1fh  %s\n",
+				cur, check, style.Render(name), DimStyle.Render(t.DueOn), h, status))
 		}
 		if end2 < total {
 			b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more\n", total-end2)))
@@ -418,7 +486,7 @@ func (m InsightsModel) viewWeek() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(DimStyle.Render("← → navigate weeks • ↑/k↓/j scroll tasks • m month view • r refresh • esc back"))
+	b.WriteString(DimStyle.Render("← → weeks • ↑/k↓/j tasks • space select • a all • M move to project • m month • r refresh • esc back"))
 	return b.String()
 }
 

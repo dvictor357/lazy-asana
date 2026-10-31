@@ -129,10 +129,16 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	showingProjects := m.step == bindStepWorkspace && len(m.projects) > 0
+	// j/k are letters while typing a token or a project search, not moves.
+	typing := m.step == bindStepTokens || showingProjects
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		key := msg.String()
+		if typing && (key == "j" || key == "k") {
+			key = ""
+		}
+		switch key {
 		case "esc":
 			if m.step == bindStepWorkspace {
 				m.step = bindStepTokens
@@ -516,7 +522,7 @@ func (m BindModel) View() string {
 				}
 			}
 
-			s += "\n" + DimStyle.Render("type to search • ↑/k↓/j navigate • enter confirm • esc back")
+			s += "\n" + DimStyle.Render("type to search • ↑↓ navigate • enter confirm • esc back")
 		}
 	}
 

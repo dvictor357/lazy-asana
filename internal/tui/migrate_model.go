@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,11 +10,10 @@ import (
 
 type migrateStep int
 
+// Move Tasks starts from tasks picked in Insights, then walks through the
+// target project, section and optional source project.
 const (
-	migrateStepWeek migrateStep = iota
-	migrateStepFetching
-	migrateStepTasks
-	migrateStepLoadProjects
+	migrateStepLoadProjects migrateStep = iota
 	migrateStepPickTarget
 	migrateStepLoadSections
 	migrateStepPickSection
@@ -26,14 +23,6 @@ const (
 )
 
 // ── Messages ──────────────────────────────────────────────────────────────────
-
-type migrateTasksMsg struct {
-	tasks        []asana.Task
-	fetchedStart string
-	fetchedEnd   string
-	weekNum      int
-	err          error
-}
 
 type migrateProjsMsg struct {
 	projects []asana.Project
@@ -56,19 +45,11 @@ type migrateExecMsg struct {
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 type MigrateModel struct {
-	cfg          *config.Config
-	client       asana.AsanaClient
-	step         migrateStep
-	width        int
-	weekInput    textinput.Model
-	weekNum      int
-	fetchedStart string
-	fetchedEnd   string
-	// task list
-	tasks      []asana.Task
-	taskCursor int
-	selected   map[int]bool // checkbox state (index into tasks)
-	// execution targets (derived on Enter)
+	cfg    *config.Config
+	client asana.AsanaClient
+	step   migrateStep
+	width  int
+	// execution targets, handed over from Insights
 	selectedTasks []asana.Task // tasks to move (one or many)
 	selectedTask  asana.Task   // first selected (used for section auto-detect)
 	// project picker
@@ -89,13 +70,9 @@ type MigrateModel struct {
 	spinner    spinner.Model
 }
 
-func NewMigrateModel(cfg *config.Config, client asana.AsanaClient) MigrateModel {
-	wi := textinput.New()
-	wi.Placeholder = fmt.Sprintf("%d", asana.CurrentWeek())
-	wi.CharLimit = 2
-	wi.Width = 6
-	wi.Focus()
-
+// NewMigrateForTasks starts Move Tasks for tasks picked in Insights. Call
+// Init to load the project list.
+func NewMigrateForTasks(cfg *config.Config, client asana.AsanaClient, tasks []asana.Task) MigrateModel {
 	ps := textinput.New()
 	ps.Placeholder = "type to filter..."
 	ps.CharLimit = 100
@@ -104,15 +81,26 @@ func NewMigrateModel(cfg *config.Config, client asana.AsanaClient) MigrateModel 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	return MigrateModel{
-		cfg:        cfg,
-		client:     client,
-		step:       migrateStepWeek,
-		weekInput:  wi,
-		projSearch: ps,
-		spinner:    sp,
-		selected:   make(map[int]bool),
+	m := MigrateModel{
+		cfg:           cfg,
+		client:        client,
+		step:          migrateStepLoadProjects,
+		projSearch:    ps,
+		spinner:       sp,
+		selectedTasks: tasks,
 	}
+	if len(tasks) > 0 {
+		m.selectedTask = tasks[0]
+	}
+	return m
 }
 
-func (m MigrateModel) Init() tea.Cmd { return nil }
+func (m MigrateModel) Init() tea.Cmd {
+	return tea.Batch(m.fetchProjects(), m.spinner.Tick)
+}
+
+// backToInsights leaves Move Tasks; refresh reloads the week so moved tasks
+// show their new place.
+func backToInsights(refresh bool, errText string) tea.Cmd {
+	return func() tea.Msg { return BackToInsightsMsg{Refresh: refresh, Err: errText} }
+}

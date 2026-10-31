@@ -61,7 +61,7 @@ func (m PlannerModel) viewComposer() string {
 	b.WriteString(composerFrame.Width(w).Render(detail))
 	b.WriteString("\n")
 
-	keys := "↑↓ move • a add • e edit • s subtask • d delete"
+	keys := "↑↓ move • a add • e edit • s subtask • c completed • d delete"
 	if m.hasTagFields() {
 		keys += " • t tags • u batch tags"
 	}
@@ -82,8 +82,8 @@ func (m PlannerModel) llmHint() string {
 
 // tableCols holds the composer column widths; the task column takes the rest.
 type tableCols struct {
-	due, task, hours, entity, product, section, status int
-	gap                                                string
+	due, task, hours, done, entity, product, section, status int
+	gap                                                      string
 }
 
 const colCursor = 2
@@ -91,9 +91,9 @@ const colCursor = 2
 // composerCols fits the columns into w, narrowing tags and section on small
 // terminals so rows never wrap.
 func composerCols(w int) tableCols {
-	c := tableCols{due: 7, hours: 5, entity: 12, product: 14, section: 10, status: 2, gap: "  "}
+	c := tableCols{due: 7, hours: 5, done: 4, entity: 12, product: 14, section: 10, status: 2, gap: "  "}
 	fixed := func() int {
-		return colCursor + c.due + c.hours + c.entity + c.product + c.section + c.status + 6*len(c.gap)
+		return colCursor + c.due + c.hours + c.done + c.entity + c.product + c.section + c.status + 7*len(c.gap)
 	}
 	if w-fixed() < 24 {
 		c.entity, c.product, c.section, c.gap = 8, 10, 9, " "
@@ -108,12 +108,12 @@ func composerCols(w int) tableCols {
 func (m PlannerModel) composerTable(w int) string {
 	c := composerCols(w)
 	taskW := c.task
-	colDue, colHours, colEntity, colProduct, colSection, colStatus, gap := c.due, c.hours, c.entity, c.product, c.section, c.status, c.gap
+	colDue, colHours, colDone, colEntity, colProduct, colSection, colStatus, gap := c.due, c.hours, c.done, c.entity, c.product, c.section, c.status, c.gap
 	cell := func(s string, n int) string { return padRight(s, n) }
 
 	var b strings.Builder
 	header := strings.Repeat(" ", colCursor) + strings.Join([]string{
-		cell("Due", colDue), cell("Task", taskW), cell("Hrs", colHours),
+		cell("Due", colDue), cell("Task", taskW), cell("Hrs", colHours), cell("Done", colDone),
 		cell("Entity", colEntity), cell("Product", colProduct), cell("Section", colSection), cell("St", colStatus),
 	}, gap)
 	b.WriteString(colHeader.Render(header))
@@ -146,6 +146,11 @@ func (m PlannerModel) composerTable(w int) string {
 		section, sectionStyle := m.sectionLabel(t)
 
 		b.WriteString(rowStyle.Render(cursor + cell(shortDate(t.DueDate), colDue) + gap + cell(t.Title, taskW) + gap + cell(hoursCell(t.Hours), colHours)))
+		done, doneStyle := "—", DimStyle
+		if t.Completed {
+			done, doneStyle = "✔", SuccessStyle
+		}
+		b.WriteString(gap + doneStyle.Render(cell(done, colDone)))
 		b.WriteString(gap + tagStyle.Render(cell(ent, colEntity)))
 		b.WriteString(gap + tagStyle.Render(cell(prod, colProduct)))
 		b.WriteString(gap + sectionStyle.Render(cell(section, colSection)))
@@ -248,6 +253,11 @@ func (m PlannerModel) composerDetail(w int) string {
 	section, sectionStyle := m.sectionLabel(t)
 	b.WriteString(label("Hours") + ValueStyle.Render(padRight(hoursCell(t.Hours), 8)) +
 		LabelStyle.Render("Due ") + ValueStyle.Render(due) + "  " + sectionStyle.Render("→ "+section) + "\n")
+	if t.Completed {
+		b.WriteString(label("Done") + SuccessStyle.Render("✔ completed") + "\n")
+	} else {
+		b.WriteString(label("Done") + DimStyle.Render("not completed yet (c to toggle)") + "\n")
+	}
 
 	tags := m.tagLabel(t)
 	if m.hasTagFields() {

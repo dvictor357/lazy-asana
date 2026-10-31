@@ -11,16 +11,12 @@ import (
 // ── Views ─────────────────────────────────────────────────────────────────────
 
 func (m MigrateModel) View() string {
-	s := WindowTitle.Render("Move Task to Project")
+	s := WindowTitle.Render("Move Tasks")
 	s += "\n\n"
 
 	switch m.step {
-	case migrateStepWeek:
-		s += m.viewWeek()
-	case migrateStepFetching, migrateStepLoadProjects, migrateStepLoadSections:
+	case migrateStepLoadProjects, migrateStepLoadSections:
 		s += m.spinner.View() + " Loading...\n"
-	case migrateStepTasks:
-		s += m.viewTasks()
 	case migrateStepPickTarget:
 		s += m.viewPickTarget()
 	case migrateStepPickSection:
@@ -34,113 +30,6 @@ func (m MigrateModel) View() string {
 	}
 
 	return lipgloss.NewStyle().Padding(2, 4).Render(s)
-}
-
-func (m MigrateModel) viewWeek() string {
-	var b strings.Builder
-	b.WriteString(LabelStyle.Render("Week Number") + "\n")
-	b.WriteString(m.weekInput.View() + "\n\n")
-	if m.cfg.UserGID == "" {
-		b.WriteString(ErrorStyle.Render("warning: no user ID saved — results show all assignees. Re-bind to fix.") + "\n\n")
-	}
-	b.WriteString(DimStyle.Render("enter fetch tasks • esc back"))
-	return b.String()
-}
-
-func (m MigrateModel) viewTasks() string {
-	var b strings.Builder
-	rangeStr := fmt.Sprintf("Week %d  ·  %s → %s", m.weekNum, m.fetchedStart, m.fetchedEnd)
-	b.WriteString(colHeader.Render(rangeStr) + "\n\n")
-
-	if len(m.tasks) == 0 {
-		b.WriteString(DimStyle.Render("No tasks found. (Tasks without a due date are excluded.)") + "\n\n")
-		b.WriteString(DimStyle.Render("esc back"))
-		return b.String()
-	}
-
-	selCount := len(m.selected)
-	header := fmt.Sprintf("Select Tasks (%d found)", len(m.tasks))
-	if selCount > 0 {
-		header += fmt.Sprintf("  —  %d selected", selCount)
-	}
-	b.WriteString(colHeader.Render(header) + "\n\n")
-
-	w := m.width
-	if w < 60 {
-		w = 100
-	}
-	nameW := w - 8 - 4 - 12 - 2 // padding(8) + checkbox+cursor(4) + date(12) + gap(2)
-	if nameW < 30 {
-		nameW = 30
-	}
-	if nameW > 70 {
-		nameW = 70
-	}
-
-	const pageSize = 8
-	cur := m.taskCursor
-	if cur >= len(m.tasks) {
-		cur = len(m.tasks) - 1
-	}
-	start := cur - pageSize/2
-	if start < 0 {
-		start = 0
-	}
-	end := start + pageSize
-	if end > len(m.tasks) {
-		end = len(m.tasks)
-		start = end - pageSize
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	if start > 0 {
-		b.WriteString(DimStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
-	}
-	for i := start; i < end; i++ {
-		t := m.tasks[i]
-
-		// Cursor + checkbox
-		cursor := " "
-		if i == cur {
-			cursor = ">"
-		}
-		check := "[ ]"
-		checkStyle := DimStyle
-		if m.selected[i] {
-			check = "[✓]"
-			checkStyle = SuccessStyle
-		}
-		nameStyle := ValueStyle
-		if i == cur {
-			nameStyle = MenuItemSelected
-		}
-
-		due := t.DueOn
-		if due == "" {
-			due = "no date"
-		}
-		b.WriteString(fmt.Sprintf("%s %s %s  %s\n",
-			cursor,
-			checkStyle.Render(check),
-			nameStyle.Render(padRight(t.Name, nameW)),
-			DimStyle.Render(due),
-		))
-		for _, mem := range t.Memberships {
-			label := "· " + mem.Project.Name
-			if mem.Section != nil && mem.Section.Name != "" {
-				label += " / " + mem.Section.Name
-			}
-			b.WriteString("      " + DimStyle.Render(label) + "\n")
-		}
-	}
-	if end < len(m.tasks) {
-		b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", len(m.tasks)-end)) + "\n")
-	}
-
-	b.WriteString("\n" + DimStyle.Render("↑/k ↓/j navigate • space toggle • a select all • enter confirm • esc back"))
-	return b.String()
 }
 
 func (m MigrateModel) viewPickTarget() string {
@@ -195,7 +84,7 @@ func (m MigrateModel) viewPickTarget() string {
 			b.WriteString(DimStyle.Render(fmt.Sprintf("  ↓ %d more", len(filtered)-end)) + "\n")
 		}
 	}
-	b.WriteString("\n" + DimStyle.Render("type to search • ↑/k ↓/j navigate • enter select • esc back"))
+	b.WriteString("\n" + DimStyle.Render("type to search • ↑↓ navigate • enter select • esc back"))
 	return b.String()
 }
 
@@ -300,6 +189,6 @@ func (m MigrateModel) viewDone() string {
 			b.WriteString(DimStyle.Render("  "+e) + "\n")
 		}
 	}
-	b.WriteString("\n" + DimStyle.Render("r/enter move more tasks • q/esc menu"))
+	b.WriteString("\n" + DimStyle.Render("enter/esc back to Insights"))
 	return b.String()
 }
