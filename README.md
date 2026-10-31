@@ -6,7 +6,7 @@ It is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), talks
 
 ## What The App Does
 
-- Bind your Asana account and choose a default workspace and project.
+- Set up your Asana account, LLM keys and git sources in Settings.
 - See hours by day and week in Insights, and move tasks to another project from there.
 - Compose, tag and submit tasks and subtasks into Asana from one table view.
 - Generate structured week plans with OpenRouter and submit them to Asana.
@@ -34,23 +34,24 @@ go run .
 
 ### First Run
 
-On first launch the app opens the bind flow:
+On first launch the app opens Settings → Asana:
 
 1. Enter your Asana Personal Access Token.
-2. Optionally enter your OpenRouter API key.
-3. Select a workspace.
-4. Select the default project you want the app to work against.
+2. Select a workspace.
+3. Select the default project you want the app to work against.
 
-The app then writes config to `~/.config/lazy-asana/config.json`.
+You land back in Settings, where you can add LLM keys and git sources. The app writes config to `~/.config/lazy-asana/config.json`.
 
 ## Core Workflows
 
-### Bind Account
+### Settings
 
-- Validates the Asana token against `/users/me`.
+- Asana: validates the token against `/users/me`.
 - Lists available workspaces.
 - Lets you search and pick a default project.
 - Detects a numeric "actual hours" field for that project when possible.
+- LLM: provider (OpenRouter or DeepSeek) and API keys.
+- Git sources: GitLab.com, self-hosted GitLab, GitHub and local folders that Task Composer imports your commits from.
 
 ### Insights
 
@@ -96,7 +97,6 @@ See [docs/config.md](docs/config.md) for field-by-field details.
 
 - The hours and move flows rely on Asana task search by due date, so tasks without a due date are excluded from those screens.
 - Hours totals depend on the app finding a numeric custom field that looks like an "actual hours" field in the selected project. If no matching field is found, totals display as `0` and planner submissions skip that custom field.
-- OpenRouter support is currently focused on full-plan generation. The separate chat screen exists in source but is not exposed from the main menu.
 - The manual planner form needs more polish than the LLM-generated planning path. The richer multi-field flow is not as complete as the week-plan generator yet.
 - The repository currently has no automated tests beyond a compile-level `go test ./...`.
 

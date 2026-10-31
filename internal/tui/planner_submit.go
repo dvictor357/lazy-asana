@@ -80,7 +80,7 @@ func (m PlannerModel) placementProblems() []string {
 func (m *PlannerModel) submitNext(idx int) tea.Cmd {
 	if m.asanaCli == nil {
 		return func() tea.Msg {
-			return submitResult{idx: idx, err: "asana client not configured — please bind your account first"}
+			return submitResult{idx: idx, err: "asana client not configured — set up Asana in Settings first"}
 		}
 	}
 	// Skip tasks already fully in Asana (resubmit after a failure).

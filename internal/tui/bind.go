@@ -37,10 +37,6 @@ type BindModel struct {
 	cfg           *config.Config
 	step          bindStep
 	asanaToken    textinput.Model
-	openrouter    textinput.Model
-	deepseek      textinput.Model
-	provider      string // "openrouter" or "deepseek"
-	cursor        int
 	workspaces    []asana.Workspace
 	projects      []asana.Project
 	wsCursor      int
@@ -62,22 +58,6 @@ func NewBindModel(cfg *config.Config) BindModel {
 	at.SetValue(cfg.AsanaToken)
 	at.Focus()
 
-	or := textinput.New()
-	or.Placeholder = "sk-or-..."
-	or.EchoMode = textinput.EchoPassword
-	or.EchoCharacter = '•'
-	or.CharLimit = 200
-	or.Width = 50
-	or.SetValue(cfg.OpenRouterKey)
-
-	ds := textinput.New()
-	ds.Placeholder = "sk-..."
-	ds.EchoMode = textinput.EchoPassword
-	ds.EchoCharacter = '•'
-	ds.CharLimit = 200
-	ds.Width = 50
-	ds.SetValue(cfg.DeepSeekKey)
-
 	ps := textinput.New()
 	ps.Placeholder = "type to filter..."
 	ps.CharLimit = 100
@@ -86,18 +66,10 @@ func NewBindModel(cfg *config.Config) BindModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	provider := cfg.LLMProvider
-	if provider == "" {
-		provider = "openrouter"
-	}
-
 	return BindModel{
 		cfg:        cfg,
 		step:       bindStepTokens,
 		asanaToken: at,
-		openrouter: or,
-		deepseek:   ds,
-		provider:   provider,
 		projSearch: ps,
 		spinner:    sp,
 	}
@@ -148,41 +120,7 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.asanaToken.Focus()
 				return m, nil
 			}
-			return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
-
-		case "tab", "ctrl+f":
-			fallthrough
-		case "shift+tab", "ctrl+b":
-			if m.step == bindStepTokens {
-				m.asanaToken.Blur()
-				m.openrouter.Blur()
-				m.deepseek.Blur()
-				const numFields = 3
-				if msg.String() == "tab" || msg.String() == "ctrl+f" {
-					m.cursor = (m.cursor + 1) % numFields
-				} else {
-					m.cursor = (m.cursor + numFields - 1) % numFields
-				}
-				switch m.cursor {
-				case 0:
-					m.asanaToken.Focus()
-				case 1:
-					m.openrouter.Focus()
-				case 2:
-					m.deepseek.Focus()
-				}
-			}
-			return m, nil
-
-		case "p":
-			if m.step == bindStepTokens {
-				if m.provider == "openrouter" {
-					m.provider = "deepseek"
-				} else {
-					m.provider = "openrouter"
-				}
-			}
-			return m, nil
+			return m, func() tea.Msg { return ScreenMsg{Screen: screenSettings} }
 
 		case "ctrl+r":
 			if m.step == bindStepTokens && m.cfg.IsBound() && m.cfg.DefaultProjectGID != "" {
@@ -287,14 +225,7 @@ func (m BindModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	if m.step == bindStepTokens {
-		switch m.cursor {
-		case 0:
-			m.asanaToken, cmd = m.asanaToken.Update(msg)
-		case 1:
-			m.openrouter, cmd = m.openrouter.Update(msg)
-		case 2:
-			m.deepseek, cmd = m.deepseek.Update(msg)
-		}
+		m.asanaToken, cmd = m.asanaToken.Update(msg)
 	}
 	return m, cmd
 }
@@ -309,9 +240,6 @@ func (m *BindModel) handleEnter() (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.step = bindStepWorkspace
 		m.cfg.AsanaToken = token
-		m.cfg.OpenRouterKey = m.openrouter.Value()
-		m.cfg.DeepSeekKey = m.deepseek.Value()
-		m.cfg.LLMProvider = m.provider
 		return *m, tea.Batch(
 			func() tea.Msg { return ErrorMsg{Message: ""} },
 			m.validateAndFetch(token),
@@ -403,7 +331,7 @@ func findActualHoursField(settings []asana.CustomFieldSetting) string {
 }
 
 func (m BindModel) View() string {
-	s := WindowTitle.Render("Bind Account")
+	s := WindowTitle.Render("Settings · Asana")
 	s += "\n\n"
 
 	if m.step == bindStepRescanFields {
@@ -415,27 +343,7 @@ func (m BindModel) View() string {
 		s += "\n"
 		s += m.asanaToken.View()
 		s += "\n\n"
-		s += LabelStyle.Render("OpenRouter API Key (optional)")
-		s += "\n"
-		s += m.openrouter.View()
-		s += "\n\n"
-		s += LabelStyle.Render("DeepSeek API Key (optional)")
-		s += "\n"
-		s += m.deepseek.View()
-		s += "\n\n"
-
-		orMark := "[ ]"
-		dsMark := "[ ]"
-		if m.provider == "deepseek" {
-			dsMark = "[x]"
-		} else {
-			orMark = "[x]"
-		}
-		s += LabelStyle.Render("Active LLM Provider:")
-		s += " " + DimStyle.Render(orMark+" openrouter")
-		s += "  " + DimStyle.Render(dsMark+" deepseek")
-		s += "\n\n"
-		s += DimStyle.Render("tab/shift+tab switch fields • p toggle provider • ctrl+r re-scan fields • enter continue • esc back")
+		s += DimStyle.Render("ctrl+r re-scan custom fields • enter continue • esc back to Settings")
 	}
 
 	if m.step == bindStepWorkspace {

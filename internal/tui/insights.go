@@ -192,7 +192,7 @@ func (m InsightsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "p":
 			if !m.allTasks && m.cfg.UserGID == "" {
-				return m, errorCmd("All my tasks needs your Asana user — re-bind your account first")
+				return m, errorCmd("All my tasks needs your Asana user — redo Settings → Asana first")
 			}
 			m.allTasks = !m.allTasks
 			m.cursor = 0

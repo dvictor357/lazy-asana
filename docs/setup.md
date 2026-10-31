@@ -42,10 +42,9 @@ go build -o lazy-asana .
 ./lazy-asana
 ```
 
-The bind screen asks for:
-
-1. `Asana Personal Access Token`
-2. `OpenRouter API Key (optional, for LLM features)`
+On first launch, Settings → Asana asks for your `Asana Personal Access Token`.
+LLM keys and git sources are added afterwards in Settings → LLM and
+Settings → Git sources.
 
 After you continue, the app:
 
@@ -97,13 +96,13 @@ If no matching field is found:
 - the hours view still works, but totals will read as `0`
 - planner submissions will not write an hours custom field
 
-If you add or rename the field later, run `Bind Account` again.
+If you add or rename the field later, open Settings → Asana and press `ctrl+r` to re-scan.
 
 ## Rotating Or Resetting Config
 
 You have two simple options:
 
-- open `Bind Account` again and overwrite the saved values
+- open Settings again and overwrite the saved values
 - delete `~/.config/lazy-asana/config.json` and relaunch the app
 
-If the app shows all assignees in the hours or move screens, re-binding is the simplest way to refresh `user_gid`.
+If Insights shows other people's tasks, redo Settings → Asana to refresh `user_gid`.

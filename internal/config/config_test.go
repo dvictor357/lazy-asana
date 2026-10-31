@@ -165,3 +165,38 @@ func TestLoadNonexistent(t *testing.T) {
 		t.Error("expected empty config from nonexistent file")
 	}
 }
+
+func TestGitSourceValidate(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name string
+		src  GitSource
+		ok   bool
+	}{
+		{"gitlab.com", GitSource{Kind: GitLab, BaseURL: GitLabDotCom, Token: "t"}, true},
+		{"gitlab no token", GitSource{Kind: GitLab, BaseURL: GitLabDotCom}, false},
+		{"gitlab bad url", GitSource{Kind: GitLab, BaseURL: "gitlab.example.com", Token: "t"}, false},
+		{"github default api", GitSource{Kind: GitHub, Token: "t"}, true},
+		{"local ok", GitSource{Kind: Local, Path: dir}, true},
+		{"local missing", GitSource{Kind: Local, Path: dir + "/nope"}, false},
+		{"local depth", GitSource{Kind: Local, Path: dir, Depth: 11}, false},
+		{"unknown kind", GitSource{Kind: "svn"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.src.Validate(); (err == nil) != tt.ok {
+				t.Fatalf("Validate() = %v, want ok=%v", err, tt.ok)
+			}
+		})
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	if got := ExpandHome("~/code"); got != "/home/me/code" {
+		t.Fatalf("ExpandHome = %q", got)
+	}
+	if got := ExpandHome("/abs"); got != "/abs" {
+		t.Fatalf("ExpandHome(/abs) = %q", got)
+	}
+}

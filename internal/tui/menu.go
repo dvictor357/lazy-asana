@@ -26,8 +26,7 @@ func NewMenu(bound, hasLLM bool) MenuModel {
 	items := []menuItem{
 		{title: "Insights", desc: "Hours by day and week, and move tasks to another project", screen: screenInsights, needsBind: true},
 		{title: "Task Composer", desc: "Compose, tag and submit tasks to Asana (LLM planning optional)", screen: screenPlanner, needsBind: true},
-		{title: "Chat with AI", desc: "Chat with the AI assistant", screen: screenChat, needsBind: true, needsLLM: true},
-		{title: "Bind Account", desc: "Configure Asana & OpenRouter API keys", screen: screenBind},
+		{title: "Settings", desc: "Asana account, LLM keys and git sources", screen: screenSettings},
 	}
 	return MenuModel{items: items, bound: bound, hasLLM: hasLLM}
 }
@@ -53,10 +52,10 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "enter":
 		item := m.items[m.cursor]
 		if item.needsBind && !m.bound {
-			return m, errorCmd("please bind your account first")
+			return m, errorCmd("set up your Asana account in Settings first")
 		}
 		if item.needsLLM && !m.hasLLM {
-			return m, errorCmd("no LLM API key configured — please bind your OpenRouter or DeepSeek key")
+			return m, errorCmd("no LLM key configured — add one in Settings → LLM")
 		}
 		return m, func() tea.Msg { return ScreenMsg{Screen: item.screen} }
 	case "q":

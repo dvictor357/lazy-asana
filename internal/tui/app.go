@@ -14,8 +14,8 @@ const (
 	screenMenu screen = iota
 	screenBind
 	screenPlanner
-	screenChat
 	screenMigrate
+	screenSettings
 	screenInsights
 )
 
@@ -26,8 +26,8 @@ type App struct {
 	screen   screen
 	menu     MenuModel
 	bind     BindModel
+	settings SettingsModel
 	planner  PlannerModel
-	chat     ChatModel
 	migrate  MigrateModel
 	insights InsightsModel
 	width    int
@@ -57,9 +57,6 @@ func NewApp(cfg *config.Config) *App {
 	} else {
 		app.planner = NewPlannerModel(cfg, ac, lc)
 		app.insights = NewInsightsModel(cfg, ac)
-		if lc != nil {
-			app.chat = NewChatModel(lc)
-		}
 	}
 
 	return app
@@ -85,16 +82,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Screen {
 		case screenBind:
 			a.bind = NewBindModel(a.cfg)
+		case screenSettings:
+			a.settings = NewSettingsModel(a.cfg)
 		case screenPlanner:
 			a.planner = NewPlannerModel(a.cfg, a.asana, a.llm)
 			a.planner.width = a.width
-			if a.llm != nil {
-				a.chat = NewChatModel(a.llm)
-			}
-		case screenChat:
-			if a.llm != nil {
-				a.chat = NewChatModel(a.llm)
-			}
 		case screenMenu:
 			a.menu = NewMenu(a.cfg.IsBound(), a.llm != nil)
 		case screenInsights:
@@ -106,6 +98,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case ErrorMsg:
 		a.err = msg.Message
+		return a, nil
+	case ConfigChangedMsg:
+		a.llm = newLLMClient(a.cfg)
+		a.menu = NewMenu(a.cfg.IsBound(), a.llm != nil)
 		return a, nil
 	case MoveTasksMsg:
 		a.migrate = NewMigrateForTasks(a.cfg, a.asana, msg.Tasks)
@@ -128,9 +124,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.llm = newLLMClient(a.cfg)
 		a.planner = NewPlannerModel(a.cfg, a.asana, a.llm)
 		a.insights = NewInsightsModel(a.cfg, a.asana)
-		a.chat = NewChatModel(a.llm)
-		a.screen = screenMenu
 		a.menu = NewMenu(true, a.llm != nil)
+		// Back to Settings, so LLM keys and git sources can be set next.
+		a.settings = NewSettingsModel(a.cfg)
+		a.screen = screenSettings
 		return a, nil
 	}
 
@@ -144,13 +141,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, c := a.bind.Update(msg)
 		a.bind = m.(BindModel)
 		cmd = c
+	case screenSettings:
+		m, c := a.settings.Update(msg)
+		a.settings = m.(SettingsModel)
+		cmd = c
 	case screenPlanner:
 		m, c := a.planner.Update(msg)
 		a.planner = m.(PlannerModel)
-		cmd = c
-	case screenChat:
-		m, c := a.chat.Update(msg)
-		a.chat = m.(ChatModel)
 		cmd = c
 	case screenMigrate:
 		m, c := a.migrate.Update(msg)
@@ -171,10 +168,10 @@ func (a *App) View() string {
 		content = a.menu.View()
 	case screenBind:
 		content = a.bind.View()
+	case screenSettings:
+		content = a.settings.View()
 	case screenPlanner:
 		content = a.planner.View()
-	case screenChat:
-		content = a.chat.View()
 	case screenMigrate:
 		content = a.migrate.View()
 	case screenInsights:

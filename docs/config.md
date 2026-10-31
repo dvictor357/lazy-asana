@@ -19,7 +19,13 @@ The app creates the parent directory if needed and writes the file with mode `06
   "default_workspace_gid": "1200000000000001",
   "default_project_gid": "1200000000000002",
   "actual_hours_field_gid": "1200000000000003",
-  "user_gid": "1200000000000004"
+  "user_gid": "1200000000000004",
+  "git_sources": [
+    { "kind": "gitlab", "base_url": "https://gitlab.com", "token": "glpat-..." },
+    { "kind": "gitlab", "name": "Office GitLab", "base_url": "https://gitlab.example.com", "token": "glpat-..." },
+    { "kind": "github", "token": "ghp_..." },
+    { "kind": "local", "path": "~/Projects/company", "depth": 4 }
+  ]
 }
 ```
 
@@ -33,6 +39,7 @@ The app creates the parent directory if needed and writes the file with mode `06
 | `default_project_gid` | Yes after bind | Primary project used by the hours and planner flows. |
 | `actual_hours_field_gid` | No | Numeric custom field used for hours totals and task submission. |
 | `user_gid` | Recommended | Current Asana user ID used to filter results to your assignments. |
+| `git_sources` | No | Where Task Composer imports commits from: `kind` (`gitlab`, `github`, `local`), optional `name`, `base_url` + `token` for GitLab/GitHub (GitHub `base_url` only for Enterprise), `path` + `depth` for local folders. Managed in Settings → Git sources. |
 
 ## Behavior Notes
 
@@ -71,7 +78,7 @@ The app creates the parent directory if needed and writes the file with mode `06
 
 ## Editing Manually
 
-You can edit the JSON by hand, but re-running `Bind Account` is usually safer because it refreshes:
+You can edit the JSON by hand, but redoing Settings → Asana is usually safer because it refreshes:
 
 - `default_workspace_gid`
 - `default_project_gid`

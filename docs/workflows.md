@@ -14,23 +14,28 @@ Common keys used across screens:
 | `esc` | Go back |
 | `q` | Quit or return to menu on some screens |
 
-## Bind Account
+## Settings
 
-Main menu label: `Bind Account`
+Main menu label: `Settings` (last item; also opens on first launch)
 
-What it does:
+Sections:
 
-- collects the Asana token
-- collects the optional OpenRouter key
-- fetches workspaces
-- lets you choose the default project for later workflows
-- auto-detects a numeric hours field when possible
+- **Asana**: Asana token, workspace and default project; auto-detects a
+  numeric hours field and the Company/Entity and Product/Project fields.
+  Project search: type to filter, `↑`/`↓` to move, `enter` to confirm.
+  `ctrl+r` on the token screen re-scans custom fields.
+- **LLM**: provider (`space` switches OpenRouter / DeepSeek) and keys; used
+  by LLM Auto-Plan and `ctrl+g` description drafts. `enter` saves, `esc`
+  discards.
+- **Git sources**: where Task Composer imports your commits from. `a` adds,
+  `e`/`enter` edits, `d` then `y` removes.
+  - GitLab.com: personal access token with `read_api`
+  - GitLab self-hosted: instance URL (`https://…`) and token
+  - GitHub: token; optional API URL for GitHub Enterprise
+  - Local folder: a folder of clones and how deep to look for repos
+    (default 4); no token
 
-Project selection supports:
-
-- typing to search
-- `up` / `k` and `down` / `j` to move through the filtered list
-- `enter` to confirm the default project
+Tokens are stored in `config.json` (mode `0600`) and shown masked.
 
 ## Insights
 
@@ -165,6 +170,3 @@ Failures and resubmits:
 - submitting again skips what Asana already has, so nothing is created twice
 - `enter` and `esc` are ignored while a submit is running
 
-## Chat with AI
-
-Main menu label: `Chat with AI` (needs an OpenRouter or DeepSeek key). A plain chat with the configured LLM; it does not read or change Asana data.

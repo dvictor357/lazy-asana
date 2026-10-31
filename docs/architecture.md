@@ -55,7 +55,6 @@ This repository is small and centered around a single Bubble Tea application.
 - Thin HTTP client over OpenRouter chat completions
 - Uses `deepseek/deepseek-chat-v3-0324` by default
 - Provides helper methods for:
-  - freeform chat calls
   - structured week-plan generation
   - plan JSON parsing
 
@@ -65,19 +64,20 @@ This repository is small and centered around a single Bubble Tea application.
 - Main files:
   - `app.go`: top-level screen router
   - `menu.go`: main menu
-  - `bind.go`: account binding and project selection
-  - `hours.go`: weekly hours view
-  - `planner*.go`: planner UI, LLM plan parsing, and submission
-  - `migrate.go`: move-task flow
-  - `chat.go`: chat screen implementation
+  - `settings.go`: Settings hub, LLM form, git sources list and form
+  - `bind.go`: Settings → Asana (token, workspace, project, field scan)
+  - `insights.go`: Insights week/month views and scope
+  - `planner*.go`, `composer_view.go`: Task Composer UI, LLM plan parsing, and submission
+  - `migrate_*.go`: Move Tasks, opened from Insights
 
 ## Screen Model
 
 The app is organized as several screen-specific Bubble Tea models:
 
 - `screenBind`
+- `screenSettings`
 - `screenPlanner`
-- `screenChat`
+- `screenInsights`
 - `screenMigrate`
 
 The menu currently exposes:
@@ -85,8 +85,7 @@ The menu currently exposes:
 - `Insights` (Move Tasks opens from its week view via `MoveTasksMsg` and
   returns with `BackToInsightsMsg`)
 - `Task Composer`
-- `Chat with AI`
-- `Bind Account`
+- `Settings` (Asana opens `screenBind`; a finished bind returns to Settings)
 
 ## Important Behavior
 
@@ -118,7 +117,6 @@ The planner expects OpenRouter to return a JSON array of tasks. If the model ret
 
 These are useful to know before extending the app:
 
-- `chat.go` is implemented but not wired into the menu.
 - The manual planner flow is less complete than the LLM week-plan path.
 - Planner-side description generation code exists, but that interaction is not yet rounded out as a documented user workflow.
 - The repository does not yet have real unit or integration tests.
