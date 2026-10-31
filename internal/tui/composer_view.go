@@ -46,9 +46,10 @@ func (m PlannerModel) viewComposer() string {
 	if len(m.tasks) == 0 {
 		empty := DimStyle.Render("No tasks yet.\n\n") +
 			ValueStyle.Render("a") + DimStyle.Render(" add a task") +
+			DimStyle.Render(" • ") + ValueStyle.Render("i") + DimStyle.Render(" import your commits") +
 			m.llmHint() + "\n"
 		b.WriteString(composerFrame.Width(w).Render(empty))
-		b.WriteString("\n" + DimStyle.Render("a add • esc back"))
+		b.WriteString("\n" + DimStyle.Render("a add • i import from git • esc back"))
 		return b.String()
 	}
 
@@ -61,7 +62,7 @@ func (m PlannerModel) viewComposer() string {
 	b.WriteString(composerFrame.Width(w).Render(detail))
 	b.WriteString("\n")
 
-	keys := "↑↓ move • a add • e edit • s subtask • c completed • d delete"
+	keys := "↑↓ move • a add • i import • e edit • s subtask • c completed • d delete"
 	if m.hasTagFields() {
 		keys += " • t tags • u batch tags"
 	}

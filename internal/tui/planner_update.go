@@ -33,6 +33,10 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.step == plannerStepComposer {
 				return m, func() tea.Msg { return ScreenMsg{Screen: screenMenu} }
 			}
+			if m.step == plannerStepImport {
+				m.leaveImport()
+				return m, clearError
+			}
 			m.step = plannerStepComposer
 			return m, nil
 		}
@@ -64,6 +68,8 @@ func (m PlannerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLLMPlan(msg)
 	case plannerStepDone:
 		return m.updateDone(msg)
+	case plannerStepImport:
+		return m.updateImport(msg)
 	}
 
 	return m, nil
@@ -89,6 +95,9 @@ func (m *PlannerModel) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "a":
 		m.openForm(plannerStepAddTask, -1)
 		return *m, clearError
+	case "i":
+		cmd := m.openImport()
+		return *m, cmd
 	case "s":
 		if len(m.tasks) == 0 {
 			return *m, nil

@@ -58,6 +58,24 @@ This repository is small and centered around a single Bubble Tea application.
   - structured week-plan generation
   - plan JSON parsing
 
+### `internal/gitimport`
+
+- Reads your commits from each configured git source in parallel:
+  - local: finds repos under the folder (a `.git` dir or file, skipping
+    `node_modules`, `vendor` and similar), runs `git log --all --no-merges`
+    for the global and per-repo `user.name`/`user.email`
+  - GitLab (`/api/v4`): projects from your push events in the range, then
+    their commits on all branches (`with_stats`), kept when the author email
+    is one of yours (`/user`, `/user/emails`) or the name matches
+  - GitHub: commit search (`author:` + `author-date:`), default branches
+    only; diff stats fetched per commit for up to 150 commits
+- Drops duplicates by SHA (the copy with diff stats wins) and commits outside
+  the range by author date in local time; one failing source becomes a
+  warning instead of hiding the others
+- Groups into one entry per (day, repo) and estimates hours: 1h + 0.5h per
+  extra commit + 1h per 300 changed lines, scaled so a day stays within 8h,
+  rounded to half hours
+
 ### `internal/tui`
 
 - App shell and all screen state machines
@@ -68,6 +86,7 @@ This repository is small and centered around a single Bubble Tea application.
   - `bind.go`: Settings → Asana (token, workspace, project, field scan)
   - `insights.go`: Insights week/month views and scope
   - `planner*.go`, `composer_view.go`: Task Composer UI, LLM plan parsing, and submission
+  - `planner_import.go`: git import step (date range, pick entries, add as draft tasks)
   - `migrate_*.go`: Move Tasks, opened from Insights
 
 ## Screen Model

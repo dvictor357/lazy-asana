@@ -41,6 +41,8 @@ func (m PlannerModel) View() string {
 		s += "\n\n" + DimStyle.Render("press enter to return")
 	case plannerStepLLMPlan:
 		s += m.viewLLMPlan()
+	case plannerStepImport:
+		s += m.viewImport()
 	}
 
 	return lipgloss.NewStyle().Padding(2, 4).Render(s)

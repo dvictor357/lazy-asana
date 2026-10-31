@@ -9,6 +9,7 @@ It is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), talks
 - Set up your Asana account, LLM keys and git sources in Settings.
 - See hours by day and week in Insights, and move tasks to another project from there.
 - Compose, tag and submit tasks and subtasks into Asana from one table view.
+- Import your commits (GitLab, GitHub, local clones) into Task Composer as draft tasks, one per day per repo.
 - Generate structured week plans with OpenRouter and submit them to Asana.
 
 ## Quickstart

@@ -129,7 +129,7 @@ func runAll(cmd tea.Cmd) []tea.Msg {
 			out = append(out, runAll(c)...)
 		}
 		return out
-	case submitResult, sectionsResult, tagOptionsResult:
+	case submitResult, sectionsResult, tagOptionsResult, importResult:
 		return []tea.Msg{msg}
 	}
 	return nil

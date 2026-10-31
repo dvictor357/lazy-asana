@@ -21,6 +21,7 @@ const (
 	plannerStepSubmitting
 	plannerStepDone
 	plannerStepLLMPlan
+	plannerStepImport
 )
 
 type PlanTask struct {
@@ -104,6 +105,8 @@ type PlannerModel struct {
 	sections       []asana.Section
 	sectionsLoaded bool
 	sectionsErr    string
+
+	imp importState // git import
 }
 
 // clampCursors keeps every task index valid after the task list shrinks.
@@ -173,6 +176,7 @@ func NewPlannerModel(cfg *config.Config, asanaCli asana.AsanaClient, llmCli llm.
 		planDays:     5,
 		tagTarget:    -1,
 		editIdx:      -1,
+		imp:          newImportState(),
 	}
 }
 

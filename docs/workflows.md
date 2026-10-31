@@ -106,6 +106,7 @@ Keys:
 | --- | --- |
 | `↑`/`k`, `↓`/`j` | Select task |
 | `a` | Add task |
+| `i` | Import your commits from the git sources as draft tasks |
 | `e` | Edit selected task (not once it is in Asana) |
 | `s` | Add subtask to selected task |
 | `c` | Toggle completed on the selected task (not once it is in Asana) |
@@ -115,6 +116,25 @@ Keys:
 | `L` | LLM Auto-Plan (needs an LLM key) |
 | `enter` | Submit |
 | `esc` | Back to the main menu |
+
+### Import From Git
+
+Started with `i` in the composer; needs at least one git source in Settings.
+
+- pick a date range (default: Monday of this week to today; max 3 months),
+  `enter` reads your commits from every git source
+- one entry per day per repo, with commit count and estimated hours
+  (by commit size, at most 8h a day); the selected entry lists its commits
+- a source that fails (bad token, wrong URL) shows as a warning above the
+  list; the other sources still load
+- the same commit found in two sources (local clone and GitLab) counts once
+- entries already imported this session show `(added)` and start unticked
+- `space` ticks, `a` ticks all/none, `enter` adds the ticked entries as
+  draft tasks (title, commit list as description, hours, due date = the
+  day); `r` changes the dates, `esc` goes back
+- drafts are ordinary composer tasks: edit, tag and submit them as usual
+- GitHub only finds commits on default branches (its search index); local
+  folders and GitLab read every branch
 
 ### Task Form
 
